@@ -435,7 +435,7 @@
     if (SR.pin) plus.push(`고정한 ${SR.pin}개`);
     let h = `<span class="sn-main"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>`
       + (hid ? `찾은 모델 <b>${SR.found}</b>개 중 <b>${SR.shown}</b>개 보임` : `찾은 모델 <b>${SR.found}</b>개 모두 보임`)
-      + (plus.length && S.perCo ? ` <small class="sn-plus" title="가성비 경계선 위 모델과 고정한 모델은 회사별 개수 제한과 상관없이 늘 보여요 (검색하지 않을 때와 같은 규칙)">(회사마다 ${S.perCo}개 + ${plus.join(" + ")})</small>` : "") + `</span></span>`;
+      + (plus.length && S.perCo ? ` <small class="sn-plus" title="가성비 경계선 위 모델과 고정한 모델은 회사별 개수 제한과 상관없이 늘 보여요 (검색하지 않을 때와 같은 규칙)">(${plus.join(" · ")}는 회사별 개수와 상관없이 표시)</small>` : "") + `</span></span>`;
     const r = [];
     const reason = (txt, n, k, btn) => `<span class="sn-r"><span>${txt} <b>${n}</b>개</span>${k ? `<button type="button" data-sn="${k}">${btn}</button>` : ""}</span>`;
     if (SR.co) r.push(reason(`꺼 둔 회사(${SR.coGroups.map(esc).join(", ")})`, SR.co, "co", "켜기"));
