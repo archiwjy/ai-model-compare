@@ -20,6 +20,8 @@ import combine
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_JS = os.path.join(HERE, "웹", "data.js")
 OUT_JSON = os.path.join(HERE, "웹", "data.json")
+# 마지막으로 모든 기관 데이터가 정상이던 결과 (올리기 할 때 함께 저장소에 올라감)
+LAST_GOOD = os.path.join(HERE, "마지막_정상_데이터.json")
 
 with open(os.path.join(HERE, "이름_보정표.json"), encoding="utf-8") as f:
     ALIAS = json.load(f)
@@ -38,6 +40,48 @@ SOURCE_INFO = {
 
 def log(msg):
     print(msg, flush=True)
+
+
+def healthy(data):
+    """모든 점수 출처(Epoch AI, Artificial Analysis)를 정상으로 받은 결과인지"""
+    src = (data or {}).get("sources") or {}
+    return bool(src) and all(src.get(s, {}).get("ok") and src.get(s, {}).get("count") for s in SOURCE_INFO)
+
+
+def previous_good():
+    """반쪽 데이터 대신 쓸 '마지막 정상 데이터' 찾기 → 가장 최근 것
+    ① 이 컴퓨터의 지금 화면 데이터 ② 저장소에 올려 둔 마지막 정상 데이터 ③ 인터넷 사이트에 올라가 있는 데이터"""
+    cands = []
+    for p in (OUT_JSON, LAST_GOOD):
+        try:
+            with open(p, encoding="utf-8") as f:
+                cands.append(json.load(f))
+        except (OSError, ValueError):
+            pass
+    site = os.environ.get("SITE_BASE_URL")
+    key = (os.environ.get("AA_API_KEY") or "").strip()
+    if site and key:
+        try:
+            from build_site import site_folder
+            # 사이트에는 data.js ("window.MODEL_DATA=...;") 만 올라가 있음
+            url = site.rstrip("/") + "/" + site_folder(key) + "/data.js"
+            import urllib.request
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": sources.UA}), timeout=30) as r:
+                txt = r.read().decode("utf-8").strip()
+            cands.append(json.loads(txt[txt.index("=") + 1:].rstrip(";")))
+        except Exception as e:
+            log(f"  ! 사이트의 예전 데이터 받기 실패: {e}")
+    good = [d for d in cands if healthy(d)]
+    return max(good, key=lambda d: d.get("generated") or "") if good else None
+
+
+def write_data(data):
+    os.makedirs(os.path.dirname(OUT_JS), exist_ok=True)
+    txt = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    with open(OUT_JS, "w", encoding="utf-8") as f:
+        f.write("window.MODEL_DATA=" + txt + ";\n")
+    with open(OUT_JSON, "w", encoding="utf-8") as f:
+        f.write(txt)
 
 
 def main(force=False):
@@ -194,12 +238,16 @@ def main(force=False):
         "effort_order": EFFORT_ORDER,
         "models": out_models,
     }
-    os.makedirs(os.path.dirname(OUT_JS), exist_ok=True)
-    txt = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-    with open(OUT_JS, "w", encoding="utf-8") as f:
-        f.write("window.MODEL_DATA=" + txt + ";\n")
-    with open(OUT_JSON, "w", encoding="utf-8") as f:
-        f.write(txt)
+    # 한 기관이라도 받기에 실패했으면 반쪽 데이터를 내보내지 않는다 (2026-09-30: AA 429 오류로 모델 494→193개가 된 적 있음)
+    if not healthy(data):
+        bad = [SOURCE_INFO[s]["name"] for s in SOURCE_INFO if not (src_out[s]["ok"] and src_out[s]["count"])]
+        prev = previous_good()
+        if prev:
+            write_data(prev)
+            log(f"⚠ {', '.join(bad)} 받기 실패 → 반쪽 데이터 대신 마지막 정상 데이터({prev.get('generated')})를 그대로 씀")
+            return 0
+        log(f"⚠ {', '.join(bad)} 받기 실패, 이전 정상 데이터도 없어 받은 것만으로 만듦")
+    write_data(data)
 
     nv = sum(len(m["variants"]) for m in out_models)
     log(f"완료: 모델 {len(out_models)}개, 점 {nv}개  ({time.time() - t0:.0f}초)")

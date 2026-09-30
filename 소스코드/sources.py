@@ -37,6 +37,9 @@ def fetch(url, name, headers=None, max_age_hours=1, timeout=30, attempts=2):
     """URL 내려받기. 1시간 안에 받은 게 있으면 재사용(기관들은 보통 하루 한 번 갱신).
     실패하면 예전 파일이라도 쓴다."""
     path = os.path.join(CACHE_DIR, name)
+    # GitHub 자동 실행: 코드를 고쳐 올릴 때마다 기관에 다시 요청하면 사용 한도(429 오류)에 걸림
+    #  → CACHE_MIN_AGE_HOURS 시간 안에 받은 원본은 그대로 재사용
+    max_age_hours = max(max_age_hours, float(os.environ.get("CACHE_MIN_AGE_HOURS") or 0))
     if FORCE:
         max_age_hours = min(max_age_hours, FORCE_MAX_AGE_HOURS)
     if os.path.exists(path) and time.time() - os.path.getmtime(path) < max_age_hours * 3600:
