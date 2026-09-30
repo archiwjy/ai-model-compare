@@ -33,12 +33,6 @@ SOURCE_INFO = {
     "aa": {"name": "Artificial Analysis", "url": "https://artificialanalysis.ai/",
            "desc": "독립 평가 회사. 에이전트·코딩·과학 등 10개 평가를 직접 돌려 만든 지능 지수",
            "license": "출처 표시 필요"},
-    "livebench": {"name": "LiveBench", "url": "https://livebench.ai/",
-                  "desc": "대학 연구팀. 정답 유출을 막으려고 매번 새 문제로 채점 (수학·코딩·추론·언어 등)",
-                  "license": "공개"},
-    "arena": {"name": "LMArena", "url": "https://lmarena.ai/",
-              "desc": "사람들이 두 답변을 보고 더 좋은 쪽에 투표한 순위. '써보면 느끼는 만족도'에 가까움",
-              "license": "CC-BY 4.0"},
 }
 
 
@@ -55,7 +49,6 @@ def main(force=False):
     loaders = [
         ("epoch", lambda: sources.load_epoch(EXCLUDE)),
         ("livebench", lambda: sources.load_livebench(EXCLUDE)),
-        ("arena", lambda: sources.load_arena(EXCLUDE)),
         ("aa", lambda: sources.load_aa(EXCLUDE)),
         ("openrouter", sources.load_openrouter),
     ]
@@ -79,7 +72,8 @@ def main(force=False):
     ep_scores, ep_meta = combine.epoch_capability(raw["epoch"])
     score_src = {"epoch": {k: (v[0], v[1]) for k, v in ep_scores.items()}}
     raw_names = {}
-    for s in ("aa", "livebench", "arena"):
+    # 점수는 Epoch AI + Artificial Analysis 두 곳만 (LiveBench 는 비용 기록에만 씀)
+    for s in ("aa",):
         if s in raw:
             d = {}
             for k, v in raw[s]["scores"].items():

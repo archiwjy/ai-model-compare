@@ -2,198 +2,184 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow, noarchive">
-<meta name="theme-color" content="#111110">
+<meta name="theme-color" content="#0b0b0c">
+<meta name="color-scheme" content="dark light">
 <meta name="apple-mobile-web-app-title" content="AI 성능비교">
+<meta name="mobile-web-app-capable" content="yes">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icons/favicon-64.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<meta name="mobile-web-app-capable" content="yes">
 <title>AI 모델 성능비교판</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="page">
 
-  <header class="top">
-    <div>
-      <h1>AI 모델 성능비교판</h1>
-      <p class="sub">여러 평가기관의 점수를 합친 <b>종합 성능</b>과 <b>실제 비용</b>을 추론 등급별로 비교합니다</p>
+<!-- ───────── 맨 위 막대 (스크롤해도 따라옴) ───────── -->
+<header class="topbar">
+  <div class="topbar-in">
+    <a class="brand" href="#top" aria-label="맨 위로">
+      <img src="icons/favicon-64.png" alt="" width="28" height="28">
+      <span class="brand-name">AI 모델 성능비교판</span>
+    </a>
+    <div class="status" id="status"></div>
+    <div class="top-actions">
+      <button id="installBtn" class="btn btn-ink" type="button" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+        <span>앱으로 설치</span>
+      </button>
+      <button id="refreshBtn" class="btn btn-ink" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>
+        <span>최신 데이터 받기</span>
+      </button>
+      <button id="themeBtn" class="btn btn-icon" type="button" aria-label="밝게/어둡게 바꾸기" title="밝게/어둡게">
+        <svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>
+      </button>
     </div>
-    <div class="top-right">
-      <div id="updated" class="updated"></div>
-      <button id="installBtn" class="primary" type="button" hidden>앱으로 설치</button>
-      <button id="refreshBtn" class="primary" type="button">최신 데이터 받기</button>
-      <button id="themeBtn" class="ghost" type="button" title="밝게/어둡게">화면 밝기</button>
-    </div>
-  </header>
+  </div>
+</header>
+
+<main class="page" id="top">
 
   <div id="notice" class="notice" hidden></div>
 
-  <!-- 추천 카드 -->
-  <section class="cards" id="cards"></section>
-
-  <!-- 조절 막대 -->
-  <section class="controls">
-    <div class="ctl">
-      <span class="ctl-label">가로축</span>
-      <div class="seg" id="xAxisSeg">
-        <button data-v="cost" type="button">문제당 비용</button>
-        <button data-v="costok" type="button" title="문제당 비용 ÷ 정답률. 자주 틀리는 모델일수록 비싸집니다">맞힌 문제당</button>
-        <button data-v="price" type="button">가격표</button>
-        <button data-v="date" type="button">출시일</button>
-      </div>
+  <!-- ───────── 첫 화면: 한눈에 보는 결론 ───────── -->
+  <section class="hero reveal">
+    <div class="hero-text">
+      <p class="eyebrow" id="eyebrow">두 평가기관의 점수를 합친 종합 성능</p>
+      <h1>돈을 쓴 만큼<br><span class="grad">똑똑한 AI</span>는 무엇일까</h1>
+      <p class="lede">점 하나가 <b>모델 × 추론 등급</b> 하나예요. 위로 갈수록 똑똑하고, 왼쪽으로 갈수록 쌉니다. <br>점선(가성비 경계선) 위의 모델을 고르면 돈을 낭비하지 않아요.</p>
     </div>
-    <div class="ctl">
-      <span class="ctl-label">출시 시기</span>
-      <div class="seg" id="periodSeg">
-        <button data-v="3" type="button">3개월</button>
-        <button data-v="6" type="button">6개월</button>
-        <button data-v="12" type="button">1년</button>
-        <button data-v="0" type="button">전체</button>
-      </div>
-    </div>
-    <div class="ctl">
-      <span class="ctl-label" title="회사마다 점수가 높은 모델부터 몇 개씩 보여줄지">회사별 모델 수</span>
-      <div class="seg" id="topSeg">
-        <button data-v="1" type="button">1</button>
-        <button data-v="2" type="button">2</button>
-        <button data-v="3" type="button">3</button>
-        <button data-v="5" type="button">5</button>
-        <button data-v="10" type="button">10</button>
-        <button data-v="15" type="button">15</button>
-        <button data-v="20" type="button">20</button>
-        <button data-v="25" type="button">25</button>
-        <button data-v="30" type="button">30</button>
-        <button data-v="0" type="button">전부</button>
-      </div>
-    </div>
-    <div class="ctl">
-      <span class="ctl-label" title="어려운 일일수록 약한 모델의 정답률이 크게 떨어집니다. 정답률과 '맞힌 문제당 비용'에 반영됩니다">작업 난이도</span>
-      <div class="seg" id="diffSeg">
-        <button data-v="easy" type="button" title="간단한 질문·번역·요약">쉬움</button>
-        <button data-v="normal" type="button" title="일반 업무·대학원 수준 문제">보통</button>
-        <button data-v="hard" type="button" title="어려운 코딩·전문 분석">어려움</button>
-        <button data-v="vhard" type="button" title="최고난도 연구·복잡한 에이전트 작업">매우 어려움</button>
-      </div>
-    </div>
-    <div class="ctl budget-ctl">
-      <label for="budget" class="ctl-label">내 예산 <span class="muted">(문제 1개당)</span></label>
-      <input type="range" id="budget" min="-2.5" max="0.7" step="0.05">
-      <output id="budgetOut"></output>
-    </div>
-    <div class="ctl grow">
-      <input id="search" type="search" placeholder="모델 이름 찾기 (예: claude, gpt-6, gemini)" autocomplete="off">
-    </div>
+    <div class="hero-cards" id="cards"></div>
   </section>
 
-  <section class="legend-row">
-    <div id="legend" class="legend"></div>
-    <div class="toggles">
-      <label><input type="checkbox" id="optFrontier"> 가성비 경계선</label>
-      <label><input type="checkbox" id="optLabels"> 이름 표시</label>
-      <label><input type="checkbox" id="optEstimated"> 추정 비용 포함</label>
-    </div>
-  </section>
-
-  <!-- 그래프 + 상세 -->
-  <section class="main">
-    <div class="chart-box">
-      <div class="chart-head">
-        <div id="chartTitle" class="chart-title"></div>
-        <div class="zoom-ctl">
-          <button id="zoomIn" class="ghost small" type="button" title="확대" aria-label="확대">＋</button>
-          <button id="zoomOut" class="ghost small" type="button" title="축소" aria-label="축소">－</button>
-          <button id="resetZoom" class="ghost small" type="button">원래대로</button>
-          <button id="fullBtn" class="ghost small" type="button" title="그래프를 화면 가득 크게 봅니다 (휴대폰은 가로로 돌리면 더 넓게)">크게 보기</button>
+  <!-- ───────── 조절 막대 (스크롤해도 따라옴) ───────── -->
+  <section class="dock" id="dock">
+    <div class="dock-in">
+      <div class="ctl">
+        <span class="ctl-label">가로축</span>
+        <div class="seg" id="xAxisSeg">
+          <button data-v="cost" type="button" title="문제 1개를 푸는 데 실제로 든 돈">문제당 비용</button>
+          <button data-v="costok" type="button" title="문제당 비용 ÷ 정답률. 자주 틀리는 모델일수록 비싸져요">맞힌 문제당</button>
+          <button data-v="price" type="button" title="100만 토큰당 가격표 (입력3:출력1 평균)">가격표</button>
+          <button data-v="date" type="button">출시일</button>
         </div>
       </div>
-      <div id="pinBar" class="pinbar"></div>
-      <div id="chart" class="chart" role="img" aria-label="모델별 비용 대비 종합 성능 산점도"></div>
-      <div class="chart-foot"><span id="zoomHint" class="zoom-hint"></span><span id="chartFoot"></span></div>
-    </div>
-    <aside class="detail" id="detail">
-      <div class="detail-empty">
-        <p><b>점을 눌러보세요.</b></p>
-        <p>그 모델이 고정돼 강조되고, 등급별 점수와 비용, 기관별 점수를 자세히 볼 수 있습니다.</p>
-        <p class="muted">마우스 휠로 확대, 확대한 뒤에는 끌어서 이동, 빈 곳을 더블클릭하면 원래대로 돌아갑니다.</p>
+      <div class="ctl">
+        <span class="ctl-label">출시</span>
+        <div class="seg" id="periodSeg">
+          <button data-v="3" type="button">3개월</button>
+          <button data-v="6" type="button">6개월</button>
+          <button data-v="12" type="button">1년</button>
+          <button data-v="0" type="button">전체</button>
+        </div>
       </div>
-    </aside>
+      <div class="ctl" id="diffCtl">
+        <span class="ctl-label" title="어려운 일일수록 약한 모델의 정답률이 크게 떨어져요">난이도</span>
+        <div class="seg" id="diffSeg">
+          <button data-v="easy" type="button" title="간단한 질문·번역·요약">쉬움</button>
+          <button data-v="normal" type="button" title="일반 업무·대학원 수준 문제">보통</button>
+          <button data-v="hard" type="button" title="어려운 코딩·전문 분석">어려움</button>
+          <button data-v="vhard" type="button" title="최고난도 연구·복잡한 에이전트 작업">매우 어려움</button>
+        </div>
+      </div>
+      <div class="ctl">
+        <span class="ctl-label">회사별</span>
+        <div class="menu" id="perCoMenu">
+          <button class="menu-btn" type="button" aria-haspopup="listbox"><span id="perCoText">3개</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+          <div class="menu-pop" role="listbox"></div>
+        </div>
+      </div>
+      <label class="search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="search" type="search" placeholder="모델 찾기 (claude, gpt-6 …)" autocomplete="off">
+      </label>
+      <div class="menu" id="viewMenu">
+        <button class="menu-btn" type="button" aria-haspopup="true" title="보기 설정">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+          <span>보기</span>
+        </button>
+        <div class="menu-pop menu-right">
+          <label class="tog"><input type="checkbox" id="optFrontier"><i></i><span>가성비 경계선</span></label>
+          <label class="tog"><input type="checkbox" id="optLabels"><i></i><span>모델 이름 표시</span></label>
+          <label class="tog"><input type="checkbox" id="optEstimated"><i></i><span>추정 비용도 그리기<small>측정 기록이 없어 가격표로 추정한 점 (속이 빈 점)</small></span></label>
+        </div>
+      </div>
+    </div>
   </section>
 
-  <!-- 출처 -->
-  <section class="sources">
-    <h2>점수 출처와 비중</h2>
-    <p class="muted">한 곳의 말만 믿지 않도록 여러 기관의 점수를 합칩니다. 비중은 기관마다 <b>다른 기관들의 합의와 얼마나 잘 맞는지</b>로 자동 계산되며, 아래에서 직접 조절할 수도 있습니다.</p>
-    <div id="sourceCards" class="source-cards"></div>
+  <!-- ───────── 그래프 ───────── -->
+  <section class="panel chart-box reveal" id="chartBox">
+    <div class="chart-head">
+      <div class="legend" id="legend"></div>
+      <div class="chart-tools">
+        <button id="zoomIn" class="tbtn" type="button" title="확대" aria-label="확대"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+        <button id="zoomOut" class="tbtn" type="button" title="축소" aria-label="축소"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+        <button id="resetZoom" class="tbtn" type="button" title="처음 화면으로" aria-label="처음 화면으로"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7M4 5v5h5"/></svg></button>
+        <button id="fullBtn" class="tbtn tbtn-text" type="button" title="그래프를 화면 가득 (휴대폰은 가로로 돌리면 더 넓게)">
+          <svg class="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+          <svg class="i-shrink" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
+          <span id="fullText">크게 보기</span>
+        </button>
+      </div>
+    </div>
+    <div class="pinbar" id="pinBar"></div>
+    <div class="chart-wrap">
+      <div class="axis-y" id="axisY">종합 성능 점수 ↑</div>
+      <div id="chart" class="chart" role="img" aria-label="모델별 비용 대비 종합 성능 그래프"></div>
+      <div class="zoom-toast" id="zoomToast" aria-live="polite"></div>
+      <div class="zoom-badge" id="zoomBadge">확대 모드 · 휠로 확대/축소 · <kbd>Esc</kbd> 끝내기</div>
+    </div>
+    <div class="chart-foot">
+      <span class="axis-x" id="axisX"></span>
+      <span class="keys">
+        <span class="key"><i class="k-line"></i>같은 모델의 추론 등급</span>
+        <span class="key"><i class="k-front"></i>가성비 경계선</span>
+        <span class="key"><i class="k-hollow"></i>추정 비용</span>
+        <span class="key" title="AI가 답하기 전에 속으로 생각(추론)하는 과정을 끄고 바로 답하는 설정. 빠르고 싸지만 덜 똑똑해요"><b>생각 없이</b> = 추론 과정 없이 바로 답</span>
+      </span>
+    </div>
   </section>
 
-  <!-- 도움말 -->
-  <section class="help">
-    <h2>어떻게 계산하나요?</h2>
-    <details open>
-      <summary>종합 성능 점수</summary>
-      <ol>
-        <li><b>Epoch AI 방식 능력치</b> — 벤치마크마다 "얼마나 어려운지"와 "실력 차이를 얼마나 잘 가려내는지"가 정해져 있습니다. 모델이 받은 점수들을 가장 잘 설명하는 능력치 하나를 찾습니다. 쉬운 시험만 본 모델이 부풀려지지 않습니다. 눈금은 <b>GPT-5 = 150, Claude 3.5 Sonnet = 130</b>입니다.</li>
-        <li><b>다른 기관 점수를 같은 눈금으로</b> — Artificial Analysis, LiveBench, LMArena 점수를, 양쪽에 다 있는 최신 모델들을 기준으로 같은 눈금에 맞춥니다.</li>
-        <li><b>비중은 데이터가 결정</b> — 다른 기관들과 크게 어긋나는 기관일수록 비중이 줄어듭니다. LMArena는 사람의 선호 투표라 말투·형식의 영향이 있어서 기본 비중을 절반으로 둡니다.</li>
-        <li><b>같은 모델 안에서 빈칸 채우기</b> — 어떤 기관이 한 등급만 평가했다면, 다른 기관들이 본 "등급 간 차이"만큼 옮겨서 나머지 등급 값을 추정합니다. 그래야 한 모델의 점들이 같은 기준으로 비교됩니다. (표와 상세에서 <i>추정</i>으로 표시)</li>
-        <li><b>± 범위와 신뢰도</b> — 평가한 기관 수와 벤치마크 수가 적거나 기관끼리 의견이 다를수록 범위가 넓어집니다. 점수 차이가 이 범위보다 작으면 사실상 비슷한 것입니다.</li>
-      </ol>
-    </details>
-    <details>
-      <summary>문제당 비용</summary>
-      <p>같은 모델은 추론 등급을 올려도 "글자당 가격"은 같지만, 더 오래 생각하느라 글자를 훨씬 많이 씁니다. 그래서 가격표가 아니라 <b>실제로 문제를 풀 때 든 비용</b>을 씁니다.</p>
-      <ul>
-        <li><b>측정</b>: LiveBench·Artificial Analysis·DeepSWE·CursorBench·ARC-AGI 등에서 실제 기록된 비용을 <b>LiveBench 문제 1개 기준</b>으로 환산해 평균낸 값</li>
-        <li><b>등급 환산</b>: 같은 모델의 다른 등급 비용에서, 데이터로 추정한 "등급별 비용 배율"로 계산 (<span id="ladderText"></span>)</li>
-        <li><b>가격 추정</b>: 측정 기록이 전혀 없어 가격표로 대략 추정 — 그래프에서 <b>속이 빈 점</b></li>
-      </ul>
-      <p><b>맞힌 문제당 비용</b> = 문제당 비용 ÷ 정답률. 싸도 자주 틀리는 모델은 다시 시켜야 하니 실제로는 더 비싸다는 점을 반영합니다.</p>
-      <p><b>정답률</b>은 조절 줄의 <b>작업 난이도</b>에 따라 계산합니다. 종합 점수가 Epoch 방식 능력치라서 "이 난이도 시험에서 몇 %를 맞힐지"를 바로 계산할 수 있습니다. 쉬움(간단한 질문·번역) → 보통(일반 업무·대학원 수준) → 어려움(어려운 코딩·전문 분석) → 매우 어려움(최고난도 연구·에이전트). 어려울수록 약한 모델의 정답률이 크게 떨어져 맞힌 문제당 비용 차이가 벌어집니다.</p>
-      <p class="muted">어려운 일은 모델이 더 오래 생각해 문제당 비용 자체도 늘지만, 이 부분은 자료가 부족해 반영하지 않았습니다 (난이도는 정답률에만 반영).</p>
-      <p class="muted">가격은 각 회사의 공식 API 정가 기준입니다. 할인·캐시·구독 요금은 반영하지 않습니다.</p>
-    </details>
-    <details>
-      <summary>가성비 경계선과 추천</summary>
-      <p><b>가성비 경계선</b>(점선)은 "이 비용으로 이보다 좋은 모델은 없다"는 점들을 이은 선입니다. 선 위의 모델을 고르면 돈을 낭비하지 않습니다.</p>
-      <p><b>가성비 추천</b>은 최고 점수의 오차 범위(최소 3점) 안에 드는 것 중 가장 싼 것입니다. 그 정도 차이는 사실상 같은 수준이기 때문입니다. 표의 <b>가성비</b> 칸은 비용이 10배 늘 때 점수가 얼마나 오르는지를 기준으로 한 상대 점수입니다.</p>
-    </details>
-  </section>
+  <!-- ───────── 모델 상세 (점을 누르면 열림) ───────── -->
+  <section class="panel detail" id="detail" aria-live="polite"></section>
 
-  <!-- 순위표 -->
-  <section class="table-box">
+  <!-- ───────── 순위표 ───────── -->
+  <section class="panel table-box reveal">
     <div class="table-head">
-      <h2>순위표</h2>
-      <div class="toggles">
-        <label class="small"><input type="checkbox" id="optPinnedOnly"> 고정한 모델만</label>
-        <label class="small"><input type="checkbox" id="optBestOnly"> 모델마다 가장 좋은 등급만</label>
+      <div>
+        <h2>순위표</h2>
+        <p class="muted" id="tableSub">줄을 누르면 그래프에 고정돼요</p>
+      </div>
+      <div class="table-opts">
+        <label class="tog"><input type="checkbox" id="optBestOnly"><i></i><span>모델마다 최고 등급만</span></label>
+        <label class="tog"><input type="checkbox" id="optPinnedOnly"><i></i><span>고정한 모델만</span></label>
       </div>
     </div>
     <div class="table-wrap">
       <table id="table">
         <thead><tr>
-          <th data-k="rank">순위</th>
+          <th data-k="rank" class="c-rank">#</th>
           <th data-k="name">모델</th>
           <th data-k="effort">추론 등급</th>
           <th data-k="score" class="num">종합 점수</th>
-          <th data-k="conf">신뢰도</th>
           <th data-k="cost" class="num">문제당 비용</th>
-          <th data-k="costok" class="num" title="문제당 비용 ÷ 정답률">맞힌 문제당</th>
-          <th data-k="value" class="num" title="비용이 10배 늘 때 점수 대비 — 높을수록 가성비 좋음">가성비</th>
-          <th data-k="price" class="num">가격표<br><span class="muted small">입력/출력 $/100만</span></th>
+          <th data-k="costok" class="num" title="문제당 비용 ÷ 정답률 (선택한 난이도 기준)">맞힌 문제당</th>
+          <th data-k="value" class="num" title="비용이 10배 늘 때 점수가 얼마나 오르는지 기준의 상대 점수 — 높을수록 가성비 좋음">가성비</th>
+          <th data-k="price" class="num" title="100만 토큰당 입력/출력 가격">가격표</th>
           <th data-k="date">출시</th>
         </tr></thead>
         <tbody></tbody>
       </table>
     </div>
-    <button id="moreRows" class="ghost" type="button">더 보기</button>
+    <button id="moreRows" class="btn btn-ghost more" type="button">더 보기</button>
   </section>
 
   <footer class="foot" id="foot"></footer>
-</div>
+</main>
 
 <script src="lib/echarts.min.js"></script>
 <script src="data.js"></script>
