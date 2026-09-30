@@ -214,6 +214,9 @@ def main(force=False):
                 m["efforts_supported"] = pr["efforts"]
             if pr.get("default_effort"):
                 m["effort_default_or"] = pr["default_effort"]
+            # True = 생각(추론)을 끌 수 없음 → '생각 없이' 등급은 실제로 고를 수 없음
+            if pr.get("reasoning_mandatory") is not None:
+                m["reasoning_mandatory"] = bool(pr["reasoning_mandatory"])
         if ei.get("eci") is not None:
             m["eci"] = ei["eci"]
         m["variants"].sort(key=lambda v: EFFORT_ORDER.index(v["effort"]) if v["effort"] in EFFORT_ORDER else 99)

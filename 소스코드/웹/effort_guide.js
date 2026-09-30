@@ -21,8 +21,9 @@ window.EFFORT_GUIDE = {
       },
       {
         name: "Codex", how: "추론 수준 선택 (설정 키 model_reasoning_effort)",
-        labels: { low: "Light (터미널: Low)", medium: "Medium", high: "High", xhigh: "Extra High", max: "Max" },
+        labels: { low: "Light (터미널: Low)", medium: "Medium", high: "High", xhigh: "Extra High", max: "Max", ultra: "Ultra" },
         only: ["gpt-6-astra", "gpt-6-1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5-6-sol", "gpt-5-6-terra", "gpt-5-6-luna"],
+        note: "Codex·ChatGPT Work 에는 Max 위에 'Ultra'(여러 에이전트가 나눠 일한 뒤 합치는 모드)가 있어요. API 등급이 아니고 아직 어느 평가기관도 점수·비용을 재지 않아 그래프에는 없어요 (재기 시작하면 자동으로 나타남). GPT-6 Luna 는 Ultra 가 없어요.",
       },
     ],
     note: "Pro 모델(예: GPT-6 Astra Pro)은 같은 모델의 'pro 모드'로, API에선 reasoning.mode = pro 로 켭니다.",

@@ -12,7 +12,7 @@ import os
 import re
 
 # 추론 등급 순서 (낮은 것 → 높은 것). 선으로 이을 때 이 순서를 쓴다.
-EFFORT_ORDER = ["none", "minimal", "low", "medium", "default", "thinking", "high", "xhigh", "max", "promax"]
+EFFORT_ORDER = ["none", "minimal", "low", "medium", "default", "thinking", "high", "xhigh", "max", "promax", "ultra"]
 
 # 화면에 보여줄 한국어 이름
 EFFORT_KO = {
@@ -26,6 +26,7 @@ EFFORT_KO = {
     "xhigh": "매우 높음",
     "max": "최대",
     "promax": "프로 최대",
+    "ultra": "울트라 (여러 에이전트)",
 }
 
 # 이름 속 단어 → 추론 등급
@@ -75,7 +76,7 @@ def _effort_from_text(text):
     t = text.lower()
     if re.search(r"non[- ]?reasoning|no[- ]?thinking|thinking[- ]?off", t):
         return "none"
-    for word, eff in [("promax", "promax"), ("xhigh", "xhigh"), ("extra high", "xhigh"), ("extra-high", "xhigh"),
+    for word, eff in [("ultra", "ultra"), ("promax", "promax"), ("xhigh", "xhigh"), ("extra high", "xhigh"), ("extra-high", "xhigh"),
                       ("maximum", "max"), ("max", "max"), ("minimal", "minimal"), ("medium", "medium"),
                       ("high", "high"), ("low", "low"), ("none", "none")]:
         if re.search(r"(?<![a-z])" + re.escape(word) + r"(?![a-z])", t):
@@ -110,7 +111,10 @@ def split_name(raw):
         if tail.startswith("pro") and tail != "pro" and tail[3:] in _EFFORT_WORDS or tail in ("prounknown",):
             pro = True
             tail = tail[3:]
-        if tail in _EFFORT_WORDS:
+        if tail == "ultra":
+            effort = "ultra"
+            s = m.group(1)
+        elif tail in _EFFORT_WORDS:
             effort = _EFFORT_WORDS[tail]
             s = m.group(1)
         elif tail == "unknown":

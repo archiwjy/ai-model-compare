@@ -59,7 +59,7 @@
   //  가성비 경계선·모델 이름 켬 · 추정 비용 끔 · 상위 5개 회사만 (기타 숨김) · 어두운 화면 · 순위표는 성능 높은 순
   const DEFAULTS = {
     x: "costok", period: 0, perCo: 3, difficulty: "vhard", search: "", hidden: ["기타"], frontier: true, labels: true,
-    estimated: false, bestOnly: false, sortK: "score", sortDir: -1, selected: null, selEffort: null,
+    estimated: false, selectableOnly: true, bestOnly: false, sortK: "score", sortDir: -1, selected: null, selEffort: null,
     theme: "dark", pinned: [], pinnedOnly: false,
   };
   // 들어올 때·새로고침할 때마다 항상 위 기본값으로 시작 (사용자 요청 2026-09-30)
@@ -117,7 +117,7 @@
   // 한국어 뜻
   const EFF_KO = {
     none: "추론 과정 없이 바로 답", minimal: "최소", low: "낮음", medium: "중간", high: "높음",
-    xhigh: "매우 높음", max: "최대", promax: "프로 최대", default: "기본 설정", thinking: "생각 켬 (단계 없음)",
+    xhigh: "매우 높음", max: "최대", promax: "프로 최대", ultra: "울트라 (여러 에이전트)", default: "기본 설정", thinking: "생각 켬 (단계 없음)",
   };
   // 화면에 보이는 등급 이름 = 그 회사에서 실제로 고르는 값 (예: max, xhigh, high)
   function effLabel(m, e) {
@@ -130,8 +130,17 @@
   }
   function defaultEffort(m) { return EDEF[m.key] || m.effort_default_or || null; }
   const EXPLICIT_EFF = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+  // 이 등급을 실제 AI 에서 사용자가 고를 수 있는지 (근거: OpenRouter 의 모델별 공식 정보)
+  //  · 생각 없이: '생각 필수' 모델이면 못 고름 (공식 등급 목록에 none 이 있으면 고를 수 있음)
+  //  · low~max: 공식 등급 목록에 있어야 함
+  //  · 근거 정보가 없는 모델은 판단하지 않고 그대로 둠 (잘못 숨기지 않게)
   function canSelect(m, e) {
     const sup = m.efforts_supported;
+    if (e === "none") {
+      if (sup && sup.includes("none")) return true;
+      if (m.reasoning_mandatory === true) return false;
+      return true;
+    }
     if (!sup || !sup.length || !EXPLICIT_EFF.includes(e)) return true;
     return sup.includes(e);
   }
@@ -183,6 +192,7 @@
     for (const m of D.models) {
       const vs = [];
       for (const v of m.variants) {
+        if (S.selectableOnly && !canSelect(m, v.effort)) continue;   // 실제로 고를 수 없는 등급은 뺌
         let num = 0, den = 0;
         const real = [], parts = [];
         for (const s of SRC_ORDER) {
@@ -1147,7 +1157,7 @@
     b.onclick = () => { S.perCo = n; save(); $("#perCoMenu").classList.remove("open"); render(); };
     perCoPop.append(b);
   }
-  const opts = { optFrontier: "frontier", optLabels: "labels", optEstimated: "estimated", optBestOnly: "bestOnly", optPinnedOnly: "pinnedOnly" };
+  const opts = { optFrontier: "frontier", optLabels: "labels", optEstimated: "estimated", optSelectable: "selectableOnly", optBestOnly: "bestOnly", optPinnedOnly: "pinnedOnly" };
   for (const [id, prop] of Object.entries(opts)) $("#" + id).onchange = (e) => { S[prop] = e.target.checked; save(); render(); };
   let searchTimer;
   $("#search").value = S.search;
