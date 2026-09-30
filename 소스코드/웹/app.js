@@ -242,7 +242,9 @@
     if (isCostAxis()) {
       const c = costFor(v);
       if (c == null) return null;
-      if (!S.estimated && v.costKind !== "측정") return null;
+      // '추정 비용도 그리기'를 끄면 가격표로 짐작한 점(속이 빈 점)만 숨김.
+      // '등급 환산'(같은 모델의 다른 등급에서 실제로 잰 비용 × 등급별 배율)은 계속 보여 줌 → 등급별 점과 선이 끊기지 않게
+      if (!S.estimated && v.costKind === "가격 추정") return null;
       return c;
     }
     if (S.x === "price") return blended(v.m);
@@ -901,7 +903,8 @@
   function renderCards(points) {
     const el = $("#cards");
     const all = points.map((p) => p.v);
-    const withCost = points.filter((p) => costFor(p.v) != null && (S.estimated || p.v.costKind === "측정")).map((p) => p.v);
+    // 그래프와 같은 기준: 가격표로 짐작한 비용은 빼고 (추정 비용 그리기를 켜면 포함), 등급 환산은 포함하되 확실성 표시에서 알려 줌
+    const withCost = points.filter((p) => costFor(p.v) != null && (S.estimated || p.v.costKind !== "가격 추정")).map((p) => p.v);
     if (!all.length) { el.innerHTML = ""; return; }
 
     // ── 최고 성능 1·2·3위: 모델마다 가장 좋은 등급 하나씩 (같은 모델의 등급만 줄줄이 나오지 않게)
@@ -970,7 +973,7 @@
       const nextRatio = next ? costFor(next) / costFor(cheap) : null;
       const checks = [
         cheap.nReal >= 2 ? { ok: true, t: "두 기관 모두 측정" } : { ok: false, t: "한 기관만 측정" },
-        cheap.costKind === "측정" ? { ok: true, t: "비용 실측" } : { ok: false, t: "비용 추정" },
+        cheap.costKind === "측정" ? { ok: true, t: "비용 실측" } : cheap.costKind === "등급 환산" ? { ok: false, t: "비용 등급 환산" } : { ok: false, t: "비용 가격표 추정" },
         !next ? { ok: true, t: "비슷한 후보 없음" } : nextRatio >= 1.25 ? { ok: true, t: "비슷한 값의 후보 없음" } : { ok: false, t: "비슷한 값의 후보 있음" },
       ];
       const nOk = checks.filter((c) => c.ok).length;
