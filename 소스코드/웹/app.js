@@ -994,7 +994,7 @@
     const el = $("#pinBar");
     el.innerHTML = "";
     if (!S.pinned.length) {
-      el.innerHTML = `<span class="hint"><svg viewBox="0 0 24 24" style="width:14px;height:14px"><path d="M9 4v6l-2 3h10l-2-3V4M12 13v7"/></svg>점을 누르면 그 모델이 고정돼요 — 여러 개 골라 비교할 수 있어요</span>`;
+      el.innerHTML = `<span class="hint"><svg viewBox="0 0 24 24" style="width:14px;height:14px"><path d="M9 4v6l-2 3h10l-2-3V4M12 13v7"/></svg>${CAN_HOVER ? "점을 누르면 그 모델이 고정돼요 — 여러 개 골라 비교할 수 있어요" : "점을 누르면 설명, 한 번 더 누르면 고정돼요 — 여러 개 골라 비교할 수 있어요"}</span>`;
       return;
     }
     for (const key of S.pinned) {

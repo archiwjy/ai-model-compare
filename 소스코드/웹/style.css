@@ -701,3 +701,4 @@ table#table { width: 100%; border-collapse: collapse; font-size: 14px; min-width
   #tableSub .badge.fr, #tableSub .badge.nr { font-size: 0; width: 9px; height: 9px; padding: 0; border-radius: 50%; display: inline-block; vertical-align: middle; margin: 0 3px 0 4px; }
 }
 @media (max-width: 700px) { .pick-conf .lv-x { display: none; } }   /* 휴대폰: '사실상 공동 1위'만 짧게 */
+:root[data-theme="light"] .vt-row.first .rk, :root[data-theme="light"] .pick[data-kind="top"] .vt-row.first .rk { color: #fff; }   /* 밝은 화면: 진한 배경 위 1위 숫자를 흰색으로 */
