@@ -410,7 +410,7 @@
       },
       series,
     }, { notMerge: true });
-    if (window.innerWidth < 700) chart.setOption({ grid: { right: 20, left: 40 } });
+    if (window.innerWidth < 700) chart.setOption({ grid: { right: 84, left: 36 } });   // 휴대폰: 오른쪽 이름표 자리 남기기
     updateZoomUi();
   }
 

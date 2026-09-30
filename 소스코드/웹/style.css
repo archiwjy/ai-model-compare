@@ -293,3 +293,15 @@ button.primary.busy::before {
 .howto .tt-code { background: var(--grid); padding: 1px 6px; border-radius: 5px; justify-self: start; }
 tr.eff-row { cursor: pointer; }
 tr.eff-row:hover td { background: var(--surface-2); }
+
+/* 좁은 화면(휴대폰): 버튼 묶음이 화면 밖으로 넘치지 않게 — 옆으로 밀어서 보기 */
+.ctl { min-width: 0; max-width: 100%; }
+.seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.seg::-webkit-scrollbar { display: none; }
+.seg button { flex: none; }
+@media (max-width: 700px) {
+  .controls { gap: 10px; }
+  .ctl { width: 100%; }
+  .ctl-label { min-width: 84px; }
+  .budget-ctl input[type=range] { flex: 1; width: auto; }
+}
