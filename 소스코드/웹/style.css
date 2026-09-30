@@ -570,3 +570,7 @@ table#table { width: 100%; border-collapse: collapse; font-size: 14px; min-width
   .chart-box.full .chart-foot { padding: 2px 4px 0; font-size: 11px; }
   .chart-box.full .axis-x { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 }
+
+/* 보기 메뉴: 기본값으로 되돌리기 */
+.menu-reset { width: 100%; margin-top: 6px; padding: 9px 10px; border-radius: 10px; border: 1px dashed var(--line-3); background: transparent; color: var(--text-2); font-size: 12.5px; font-weight: 600; text-align: center; transition: color .2s, border-color .2s, background .2s; }
+.menu-reset:hover { color: var(--text); border-color: var(--ink); background: var(--surface-3); }

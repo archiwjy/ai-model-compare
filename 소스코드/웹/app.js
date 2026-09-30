@@ -55,20 +55,37 @@
   const PER_CO_OPTIONS = [1, 2, 3, 5, 10, 15, 20, 25, 30, 0];
 
   // ───────── 설정 (바꾸면 바로 저장)
+  //  기본값 (사용자가 정함, 2026-09-30): 맞힌 문제당 · 전체 기간 · 매우 어려움 · 회사마다 3개 ·
+  //  가성비 경계선·모델 이름 켬 · 추정 비용 끔 · 상위 5개 회사만 (기타 숨김)
   const DEFAULTS = {
-    x: "cost", period: 6, perCo: 3, difficulty: "normal", search: "", hidden: [], frontier: true, labels: true,
-    estimated: true, bestOnly: false, sortK: "score", sortDir: -1, selected: null, selEffort: null,
+    x: "costok", period: 0, perCo: 3, difficulty: "vhard", search: "", hidden: ["기타"], frontier: true, labels: true,
+    estimated: false, bestOnly: false, sortK: "score", sortDir: -1, selected: null, selEffort: null,
     theme: null, pinned: [], pinnedOnly: false,
   };
+  // 기본값을 바꾸면 이 번호를 올림 → 예전에 저장된 보기 설정은 한 번 새 기본값으로 바뀜 (밝기·고정한 모델은 유지)
+  const SETTINGS_VER = 2;
+  const KEEP_ON_RESET = ["theme", "pinned"];
   let S = load();
   function load() {
     try {
       const s = JSON.parse(localStorage.getItem("aiCompare.settings") || "{}");
+      if (s.v !== SETTINGS_VER) {
+        const kept = {};
+        for (const k of KEEP_ON_RESET) if (s[k] !== undefined) kept[k] = s[k];
+        return Object.assign({}, DEFAULTS, kept);
+      }
       return Object.assign({}, DEFAULTS, s);
     } catch (e) { return Object.assign({}, DEFAULTS); }
   }
   function save() {
-    try { localStorage.setItem("aiCompare.settings", JSON.stringify(S)); } catch (e) { /* 저장 안 돼도 동작 */ }
+    try { localStorage.setItem("aiCompare.settings", JSON.stringify(Object.assign({}, S, { v: SETTINGS_VER }))); } catch (e) { /* 저장 안 돼도 동작 */ }
+  }
+  function resetSettings() {
+    const kept = {};
+    for (const k of KEEP_ON_RESET) kept[k] = S[k];
+    S = Object.assign({}, DEFAULTS, kept);
+    save();
+    location.reload();
   }
   if (!PER_CO_OPTIONS.includes(S.perCo)) S.perCo = 3;
   for (const k of ["top", "budget", "weight", "enabled"]) delete S[k];   // 예전 버전 설정은 버림
@@ -217,8 +234,8 @@
     const cutoff = S.period ? monthsAgo(S.period) : null;
     const q = S.search.trim().toLowerCase();
     let list = all.filter((M) => {
+      if (q) return (M.name + " " + M.key + " " + M.company).toLowerCase().includes(q);   // 검색은 숨긴 회사도 찾음
       if (S.hidden.includes(groupOf(M.company))) return false;
-      if (q) return (M.name + " " + M.key + " " + M.company).toLowerCase().includes(q);
       if (cutoff && (!M.date || M.date < cutoff)) return false;
       return true;
     });
@@ -1269,6 +1286,7 @@
     }, 3600000);
   });
 
+  $("#resetSettings").onclick = () => resetSettings();
   pickCompanies(computeAll());
   render();
   fitChartHeight();
