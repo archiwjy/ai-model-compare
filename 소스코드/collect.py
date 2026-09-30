@@ -22,6 +22,7 @@ OUT_JS = os.path.join(HERE, "웹", "data.js")
 OUT_JSON = os.path.join(HERE, "웹", "data.json")
 # 마지막으로 모든 기관 데이터가 정상이던 결과 (올리기 할 때 함께 저장소에 올라감)
 LAST_GOOD = os.path.join(HERE, "마지막_정상_데이터.json")
+KEEP_PREVIOUS_HOURS = 7 * 24   # 한 기관이 실패해도 이 기간까지는 마지막 정상 데이터를 유지
 
 with open(os.path.join(HERE, "이름_보정표.json"), encoding="utf-8") as f:
     ALIAS = json.load(f)
@@ -72,7 +73,19 @@ def previous_good():
         except Exception as e:
             log(f"  ! 사이트의 예전 데이터 받기 실패: {e}")
     good = [d for d in cands if healthy(d)]
-    return max(good, key=lambda d: d.get("generated") or "") if good else None
+    if not good:
+        return None
+    best = max(good, key=lambda d: d.get("generated") or "")
+    # 한 기관이 아주 오래(7일 넘게) 데이터를 못 주면, 멈춘 옛 화면 대신 받을 수 있는 기관만으로 새로 계산
+    #  (사이트가 영원히 옛날 데이터에 멈추지 않게 — 화면 맨 위에 어느 기관이 빠졌는지 안내가 나옴)
+    try:
+        age_h = (time.time() - time.mktime(time.strptime(best.get("generated") or "", "%Y-%m-%d %H:%M"))) / 3600
+    except ValueError:
+        age_h = 0
+    if age_h > KEEP_PREVIOUS_HOURS:
+        log(f"  ! 마지막 정상 데이터가 {age_h / 24:.0f}일 전 것이라 쓰지 않음 → 받을 수 있는 기관만으로 계산")
+        return None
+    return best
 
 
 def write_data(data):

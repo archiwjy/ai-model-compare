@@ -1,6 +1,6 @@
 # 자동 점검 — GitHub 자동 실행(6시간마다)의 마지막에 돈다.
-# 사람이 신경 쓰지 않아도 되도록, 손봐야 할 일이 생겼을 때만 GitHub 이슈(알림 메일)를 열고
-# 문제가 사라지면 스스로 닫는다.
+# 사이트는 무슨 일이 있어도 마지막 정상 데이터로 계속 돌아간다. 이 점검은 '정보용' 알림만 보낸다:
+# 계산 단계 오류, 또는 한 기관 데이터를 24시간 넘게 못 받을 때 GitHub 이슈(알림 메일)를 열고, 해결되면 스스로 닫는다.
 #
 #   python 소스코드/auto_check.py          → 문제 확인 후 이슈 열기/고치기/닫기 (GH_TOKEN 필요)
 #   python 소스코드/auto_check.py --dry    → 이슈는 건드리지 않고 문제만 출력 (시험용)
@@ -10,16 +10,13 @@ sys.dont_write_bytecode = True
 import datetime
 import json
 import os
-import re
 import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "웹", "data.json")
-GUIDE = os.path.join(HERE, "웹", "effort_guide.js")
 LABEL = "자동점검"
 TITLE = "⚠ 성능비교판 자동 점검: 확인이 필요해요"
 STALE_HOURS = 24          # 이 시간 넘게 새 데이터를 못 받으면 알림
-GUIDE_MAX_DAYS = 90       # 앱 설정 안내를 이 기간 넘게 점검하지 않으면 알림
 
 
 def hours_since(stamp):
@@ -51,19 +48,6 @@ def find_problems():
         if h.get("using_previous") and age is not None and age > STALE_HOURS:
             out.append(f"{', '.join(h.get('failed') or ['일부 기관'])} 데이터를 {age:.0f}시간째 새로 받지 못하고 있어요 "
                        f"(사이트는 {d.get('generated')} 기준 정상 데이터를 보여 주는 중). 키 만료·주소 변경·사용 한도를 확인해 주세요.")
-        if h.get("new_efforts"):
-            out.append("처음 보는 추론 등급 이름이 나타났어요: " + ", ".join(h["new_efforts"]) +
-                       " — 그래프에는 자동으로 나오지만, 등급 순서·한국어 이름·앱 설정 안내를 확인해 주세요.")
-    try:
-        with open(GUIDE, encoding="utf-8") as f:
-            m = re.search(r'EFFORT_GUIDE_DATE\s*=\s*"(\d{4}-\d{2}-\d{2})"', f.read())
-        if m:
-            days = (datetime.date.today() - datetime.date.fromisoformat(m.group(1))).days
-            if days > GUIDE_MAX_DAYS:
-                out.append(f"회사별 앱 설정 안내(effort_guide.js)를 {days}일째 점검하지 않았어요. "
-                           "각 회사 앱의 추론 등급 메뉴 이름이 바뀌었는지 확인해 주세요 (API 등급은 자동 갱신됨).")
-    except OSError:
-        pass
     return out
 
 

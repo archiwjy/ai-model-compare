@@ -140,7 +140,8 @@
     vs.splice(0, vs.length, ...known);
     return vs;
   }
-  function defaultEffort(m) { return EDEF[m.key] || m.effort_default_or || null; }
+  // 기본 등급: 공식 자료(OpenRouter, 6시간마다 자동 갱신)를 먼저, 없을 때만 손으로 적어 둔 값
+  function defaultEffort(m) { return m.effort_default_or || EDEF[m.key] || null; }
   const EXPLICIT_EFF = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
   // 이 등급을 실제 AI 에서 사용자가 고를 수 있는지 (근거: OpenRouter 의 모델별 공식 정보)
   //  · 생각 끔(none): '생각 필수' 모델이면 못 고름 (공식 등급 목록에 none 이 있으면 고를 수 있음)
@@ -180,7 +181,8 @@
     else out.push({ k: "API", v: `이 모델은 '${e}' 등급을 직접 고를 수 없어요 (평가기관 조건).` });
     for (const a of g.apps || []) {
       if (a.only && !a.only.includes(m.key)) continue;
-      if (a.labels && a.labels[e]) out.push({ k: a.name, v: `${a.how} → ${a.labels[e]}` });
+      // 앱 메뉴 이름은 자동으로 받아올 공식 자료가 없어 참고용 (날짜는 상세 아래에 표시)
+      if (a.labels && a.labels[e]) out.push({ k: a.name + " (참고)", v: `${a.how} → ${a.labels[e]}` });
       else if (a.note) out.push({ k: a.name, v: a.note });
     }
     return out;
@@ -1111,7 +1113,7 @@
     const sup = m.efforts_supported;
     if (sup && sup.length) h += `<div class="note">고를 수 있는 등급: ${sup.slice().sort((a, b) => effIdx(a) - effIdx(b)).map((e) => esc(effLabel(m, e))).join(" · ")}${defaultEffort(m) ? ` (기본값 ${esc(effLabel(m, defaultEffort(m)))})` : ""}</div>`;
     if (g && g.note) h += `<div class="note">${esc(g.note)}</div>`;
-    if (window.EFFORT_GUIDE_DATE) h += `<div class="note muted">앱 설정 안내는 ${esc(window.EFFORT_GUIDE_DATE)} 기준 · API 등급 목록은 6시간마다 자동 갱신</div>`;
+    if (window.EFFORT_GUIDE_DATE) h += `<div class="note muted">고를 수 있는 등급·API 값·기본 등급은 6시간마다 자동 갱신 · 앱 메뉴 이름(참고)은 ${esc(window.EFFORT_GUIDE_DATE)} 기준</div>`;
     h += `</div>`;
 
     h += `<div class="dcol"><div class="sect">기관별 점수 <b>${esc(v.eff)}</b></div>`;
@@ -1266,6 +1268,11 @@
   setInterval(renderStatus, 60000);
   (function healthNotice() {
     const H = D.health || {};
+    const failed = (H.failed || []).filter((x) => x !== "OpenRouter");
+    if (!H.using_previous && failed.length) {   // 7일 넘게 못 받아 받을 수 있는 기관만으로 계산한 경우
+      notice(`${esc(failed.join(", "))} 데이터를 오래 받지 못해, 받을 수 있는 기관만으로 계산했어요. 일부 모델·등급이 빠질 수 있어요. 다시 받아지면 자동으로 돌아와요.`);
+      return;
+    }
     if (!H.using_previous) return;
     const age = (Date.now() - new Date(String(D.generated).replace(" ", "T") + ":00+09:00").getTime()) / 36e5;
     if (!(age > 12)) return;
