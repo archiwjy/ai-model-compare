@@ -54,7 +54,7 @@
   const VALUE_K = 6; // 가성비: 비용 10배 = 6점
   const PER_CO_OPTIONS = [1, 2, 3, 5, 10, 15, 20, 25, 30, 0];
 
-  // ───────── 설정 (바꾸면 바로 저장)
+  // ───────── 설정 (저장하지 않음 — 열 때마다 기본값)
   //  기본값 (사용자가 정함, 2026-09-30): 맞힌 문제당 · 전체 기간 · 매우 어려움 · 회사마다 3개 ·
   //  가성비 경계선·모델 이름 켬 · 추정 비용 끔 · 상위 5개 회사만 (기타 숨김) · 어두운 화면 · 순위표는 성능 높은 순
   const DEFAULTS = {
@@ -62,30 +62,14 @@
     estimated: false, bestOnly: false, sortK: "score", sortDir: -1, selected: null, selEffort: null,
     theme: "dark", pinned: [], pinnedOnly: false,
   };
-  // 기본값을 바꾸면 이 번호를 올림 → 예전에 저장된 보기 설정은 한 번 새 기본값으로 바뀜 (고정한 모델은 유지)
-  const SETTINGS_VER = 3;
-  const KEEP_ON_RESET = ["pinned"];   // 되돌려도 고정한 모델은 남김
-  let S = load();
-  function load() {
-    try {
-      const s = JSON.parse(localStorage.getItem("aiCompare.settings") || "{}");
-      if (s.v !== SETTINGS_VER) {
-        const kept = {};
-        for (const k of KEEP_ON_RESET) if (s[k] !== undefined) kept[k] = s[k];
-        return Object.assign({}, DEFAULTS, kept);
-      }
-      return Object.assign({}, DEFAULTS, s);
-    } catch (e) { return Object.assign({}, DEFAULTS); }
-  }
-  function save() {
-    try { localStorage.setItem("aiCompare.settings", JSON.stringify(Object.assign({}, S, { v: SETTINGS_VER }))); } catch (e) { /* 저장 안 돼도 동작 */ }
-  }
+  // 들어올 때·새로고침할 때마다 항상 위 기본값으로 시작 (사용자 요청 2026-09-30)
+  //  · 화면에서 바꾼 설정은 그 창을 보는 동안만 유지되고 저장하지 않음
+  const fresh = () => JSON.parse(JSON.stringify(DEFAULTS));
+  let S = fresh();
+  try { localStorage.removeItem("aiCompare.settings"); } catch (e) { /* 예전에 저장된 설정 지우기 */ }
+  function save() { /* 저장하지 않음 (항상 기본값으로 시작) */ }
   function resetSettings() {
-    const kept = {};
-    for (const k of KEEP_ON_RESET) kept[k] = S[k];
-    S = Object.assign({}, DEFAULTS, kept);
-    save();
-    location.reload();
+    location.reload();   // 새로 열면 항상 기본값
   }
   if (!PER_CO_OPTIONS.includes(S.perCo)) S.perCo = 3;
   for (const k of ["top", "budget", "weight", "enabled"]) delete S[k];   // 예전 버전 설정은 버림
