@@ -42,6 +42,22 @@ _EFFORT_WORDS = {
     "promax": "promax",
 }
 
+# OpenRouter 공식 등급 목록 등에서 배운 '처음 보는 등급 이름' (예: 회사가 새 등급을 만들면 자동으로 인식)
+#  · 이름 끝의 '-단어' 로는 쓰지 않음 (Nemotron 3 Ultra 처럼 모델 이름일 수 있어서)
+LEARNED = set()
+
+
+def learn_efforts(words):
+    """새 등급 이름 배우기 → 처음 보는 것만 돌려줌"""
+    new = set()
+    for w in words or []:
+        w = str(w).strip().lower()
+        if re.fullmatch(r"[a-z]{2,15}", w) and w not in _EFFORT_WORDS and w not in EFFORT_ORDER and w not in LEARNED:
+            LEARNED.add(w)
+            new.add(w)
+    return new
+
+
 # 등급 정보는 아니지만 이름 끝에 붙는 군더더기
 _NOISE_WORDS = {"effort", "auto", "adaptive", "latest", "default", "fallback", "reasoning-effort"}
 _THINK_WORDS = {"thinking", "reasoning", "think"}
@@ -81,6 +97,9 @@ def _effort_from_text(text):
                       ("high", "high"), ("low", "low"), ("none", "none")]:
         if re.search(r"(?<![a-z])" + re.escape(word) + r"(?![a-z])", t):
             return eff
+    for word in sorted(LEARNED):
+        if re.search(r"(?<![a-z])" + re.escape(word) + r"(?![a-z])", t):
+            return word
     if re.search(r"reasoning|thinking", t):
         return "thinking"
     return None
@@ -116,6 +135,9 @@ def split_name(raw):
             s = m.group(1)
         elif tail in _EFFORT_WORDS:
             effort = _EFFORT_WORDS[tail]
+            s = m.group(1)
+        elif tail in LEARNED:
+            effort = tail
             s = m.group(1)
         elif tail == "unknown":
             effort = "unknown"

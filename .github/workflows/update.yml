@@ -13,6 +13,7 @@ permissions:
   contents: write
   pages: write
   id-token: write
+  issues: write
 
 concurrency:
   group: pages
@@ -38,6 +39,7 @@ jobs:
           key: raw-${{ github.run_id }}
           restore-keys: raw-
       - name: 데이터 모으고 계산하기
+        id: collect
         env:
           AA_API_KEY: ${{ secrets.AA_API_KEY }}
           CACHE_DIR: ${{ runner.temp }}/cache
@@ -48,6 +50,13 @@ jobs:
         env:
           AA_API_KEY: ${{ secrets.AA_API_KEY }}
         run: python 소스코드/build_site.py _site
+      # 손봐야 할 일이 생기면 GitHub 이슈(알림 메일)를 열고, 해결되면 스스로 닫음
+      - name: 자동 점검
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COLLECT_OUTCOME: ${{ steps.collect.outcome }}
+        run: python 소스코드/auto_check.py
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

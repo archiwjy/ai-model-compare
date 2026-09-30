@@ -13,7 +13,7 @@ import os
 import time
 import traceback
 
-from names import EFFORT_KO, EFFORT_ORDER, company_of, pretty_name
+from names import EFFORT_KO, EFFORT_ORDER, company_of, learn_efforts, pretty_name
 import sources
 import combine
 
@@ -91,16 +91,21 @@ def main(force=False):
     status = {}
     raw = {}
     loaders = [
+        ("openrouter", sources.load_openrouter),      # 먼저: 공식 등급 목록에서 새 등급 이름을 배운 뒤 다른 기관 이름을 해석
         ("epoch", lambda: sources.load_epoch(EXCLUDE)),
         ("livebench", lambda: sources.load_livebench(EXCLUDE)),
         ("aa", lambda: sources.load_aa(EXCLUDE)),
-        ("openrouter", sources.load_openrouter),
     ]
     for name, fn in loaders:
         log(f"· {name} 받는 중...")
         try:
             raw[name] = fn()
             status[name] = {"ok": True, "updated": raw[name].get("updated")}
+            if name == "openrouter":
+                vocab = {e for p in raw[name].get("prices", {}).values() for e in (p.get("efforts") or [])}
+                new_words = learn_efforts(vocab)
+                if new_words:
+                    log(f"  ★ 처음 보는 공식 등급 이름: {sorted(new_words)} → 자동으로 인식")
         except Exception as e:
             status[name] = {"ok": False, "error": str(e)}
             log(f"  ✗ {name} 실패: {e}")
@@ -241,11 +246,21 @@ def main(force=False):
         "effort_order": EFFORT_ORDER,
         "models": out_models,
     }
+    # 자동 점검용 기록: 실패한 기관, 처음 보는 등급 이름 (화면 알림과 GitHub 알림에 씀)
+    seen = {v["effort"] for m in out_models for v in m["variants"]}
+    health = {
+        "checked": time.strftime("%Y-%m-%d %H:%M"),
+        "failed": [SOURCE_INFO[s]["name"] for s in SOURCE_INFO if not (src_out[s]["ok"] and src_out[s]["count"])]
+                  + ([] if status.get("openrouter", {}).get("ok") else ["OpenRouter"]),
+        "new_efforts": sorted(e for e in seen if e not in EFFORT_ORDER and e != "unknown"),
+    }
+    data["health"] = health
     # 한 기관이라도 받기에 실패했으면 반쪽 데이터를 내보내지 않는다 (2026-09-30: AA 429 오류로 모델 494→193개가 된 적 있음)
     if not healthy(data):
         bad = [SOURCE_INFO[s]["name"] for s in SOURCE_INFO if not (src_out[s]["ok"] and src_out[s]["count"])]
         prev = previous_good()
         if prev:
+            prev["health"] = dict(health, using_previous=True)
             write_data(prev)
             log(f"⚠ {', '.join(bad)} 받기 실패 → 반쪽 데이터 대신 마지막 정상 데이터({prev.get('generated')})를 그대로 씀")
             return 0

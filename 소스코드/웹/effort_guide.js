@@ -7,6 +7,9 @@
 //   value   : 등급 → API에 넣는 값 (없으면 그 등급은 API로 직접 고를 수 없음)
 //   apps    : [{ name: "앱 이름", how: "고르는 곳", labels: { 등급: "화면에 보이는 이름" }, note }]
 //   note    : 회사 전체 참고사항
+// 앱 설정 안내를 마지막으로 점검한 날 (90일 넘으면 자동 점검이 GitHub 알림을 보냄)
+window.EFFORT_GUIDE_DATE = "2026-09-30";
+
 window.EFFORT_GUIDE = {
   OpenAI: {
     param: "reasoning_effort",

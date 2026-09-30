@@ -120,18 +120,30 @@
     xhigh: "매우 높음", max: "최대", promax: "프로 최대", ultra: "울트라 (여러 에이전트)", default: "기본 설정", thinking: "생각 켬 (단계 없음)",
   };
   // 화면에 보이는 등급 이름 = 그 회사에서 실제로 고르는 값 (예: max, xhigh, high)
+  // 등급 이름은 회사 공식 이름으로 (추론을 끄는 것도: OpenAI 는 API 값 "none", 켜고 끄는 방식인 회사는 "생각 끔")
   function effLabel(m, e) {
-    if (e === "none") return "생각 없이";
     const g = EG[m.company];
+    if (e === "none") return g && g.value && g.value.none ? g.value.none : "생각 끔";
     if (g && g.value && g.value[e]) return g.value[e];
     if (e === "default") return "기본";
     if (e === "thinking") return "생각 켬";
     return e;   // 공식 단계가 없는 회사: 평가기관이 붙인 이름 그대로
   }
+  // 등급 순서대로 정렬. 처음 보는 등급(회사가 새로 만든 것)은 비용으로 자리를 찾음 (생각을 많이 할수록 비쌈)
+  function sortEfforts(vs) {
+    const known = vs.filter((v) => effIdx(v.effort) < 99).sort((a, b) => effIdx(a.effort) - effIdx(b.effort));
+    for (const u of vs.filter((v) => effIdx(v.effort) >= 99)) {
+      let at = known.length;
+      if (u.cost != null) { const i = known.findIndex((k) => k.cost != null && k.cost > u.cost); if (i >= 0) at = i; }
+      known.splice(at, 0, u);
+    }
+    vs.splice(0, vs.length, ...known);
+    return vs;
+  }
   function defaultEffort(m) { return EDEF[m.key] || m.effort_default_or || null; }
   const EXPLICIT_EFF = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
   // 이 등급을 실제 AI 에서 사용자가 고를 수 있는지 (근거: OpenRouter 의 모델별 공식 정보)
-  //  · 생각 없이: '생각 필수' 모델이면 못 고름 (공식 등급 목록에 none 이 있으면 고를 수 있음)
+  //  · 생각 끔(none): '생각 필수' 모델이면 못 고름 (공식 등급 목록에 none 이 있으면 고를 수 있음)
   //  · low~max: 공식 등급 목록에 있어야 함
   //  · 근거 정보가 없는 모델은 판단하지 않고 그대로 둠 (잘못 숨기지 않게)
   function canSelect(m, e) {
@@ -152,11 +164,14 @@
       out.push({ k: "주의", v: `이 모델은 '${effLabel(m, e)}' 등급을 직접 고를 수 없어요. 평가기관이 별도 조건으로 측정한 값이라 참고용으로만 보세요.` });
       return out;
     }
+    const sup = m.efforts_supported || [];
     if (!g) {
-      out.push({ k: "설정", v: `이 회사의 공식 등급 이름은 아직 정리돼 있지 않아요. 평가기관이 쓴 이름: ${e}` });
+      if (sup.includes(e)) out.push({ k: "API", v: `reasoning effort = "${e}" (OpenRouter 공식 목록 기준)`, code: true });
+      else out.push({ k: "설정", v: `이 회사의 공식 등급 이름은 아직 정리돼 있지 않아요. 평가기관이 쓴 이름: ${e}` });
       return out;
     }
     if (g.value && g.value[e]) out.push({ k: "API", v: `${g.param} = "${g.value[e]}"`, code: true });
+    else if (sup.includes(e) && e !== "none") out.push({ k: "API", v: `${g.param} = "${e}"`, code: true });
     else if (e === "none" && g.none) out.push({ k: "API", v: g.none });
     else if (e === "none" && g.value && g.value.none) out.push({ k: "API", v: `${g.param} = "none"`, code: true });
     else if (e === "default") out.push({ k: "API", v: "따로 설정하지 않음 (기본값)" });
@@ -213,7 +228,7 @@
         });
       }
       if (!vs.length) continue;
-      vs.sort((a, b) => effIdx(a.effort) - effIdx(b.effort));
+      sortEfforts(vs);
       for (const v of vs) {
         v.acc = accuracyOf(v.score);
         v.costOk = v.cost != null && v.acc ? v.cost / v.acc : null;
@@ -1096,6 +1111,7 @@
     const sup = m.efforts_supported;
     if (sup && sup.length) h += `<div class="note">고를 수 있는 등급: ${sup.slice().sort((a, b) => effIdx(a) - effIdx(b)).map((e) => esc(effLabel(m, e))).join(" · ")}${defaultEffort(m) ? ` (기본값 ${esc(effLabel(m, defaultEffort(m)))})` : ""}</div>`;
     if (g && g.note) h += `<div class="note">${esc(g.note)}</div>`;
+    if (window.EFFORT_GUIDE_DATE) h += `<div class="note muted">앱 설정 안내는 ${esc(window.EFFORT_GUIDE_DATE)} 기준 · API 등급 목록은 6시간마다 자동 갱신</div>`;
     h += `</div>`;
 
     h += `<div class="dcol"><div class="sect">기관별 점수 <b>${esc(v.eff)}</b></div>`;
@@ -1248,6 +1264,13 @@
   }
   renderStatus();
   setInterval(renderStatus, 60000);
+  (function healthNotice() {
+    const H = D.health || {};
+    if (!H.using_previous) return;
+    const age = (Date.now() - new Date(String(D.generated).replace(" ", "T") + ":00+09:00").getTime()) / 36e5;
+    if (!(age > 12)) return;
+    notice(`${esc((H.failed || ["일부 기관"]).join(", "))} 데이터를 새로 받지 못해 <b>${esc(D.generated)}</b> 기준 정상 데이터를 보여 주고 있어요. 6시간마다 자동으로 다시 시도해요.`);
+  })();
   // 믿을 만한 정도: 두 기관이 같은 등급을 쟀을 때 점수가 얼마나 비슷한지 (보정 없이 원래 값 그대로)
   (function eyebrow() {
     const dis = computeAll().flatMap((M) => M.vs).map((v) => v.disagree).filter((x) => x != null).sort((a, b) => a - b);
