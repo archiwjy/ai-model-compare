@@ -56,15 +56,15 @@
 
   // ───────── 설정 (바꾸면 바로 저장)
   //  기본값 (사용자가 정함, 2026-09-30): 맞힌 문제당 · 전체 기간 · 매우 어려움 · 회사마다 3개 ·
-  //  가성비 경계선·모델 이름 켬 · 추정 비용 끔 · 상위 5개 회사만 (기타 숨김)
+  //  가성비 경계선·모델 이름 켬 · 추정 비용 끔 · 상위 5개 회사만 (기타 숨김) · 어두운 화면 · 순위표는 성능 높은 순
   const DEFAULTS = {
     x: "costok", period: 0, perCo: 3, difficulty: "vhard", search: "", hidden: ["기타"], frontier: true, labels: true,
     estimated: false, bestOnly: false, sortK: "score", sortDir: -1, selected: null, selEffort: null,
-    theme: null, pinned: [], pinnedOnly: false,
+    theme: "dark", pinned: [], pinnedOnly: false,
   };
-  // 기본값을 바꾸면 이 번호를 올림 → 예전에 저장된 보기 설정은 한 번 새 기본값으로 바뀜 (밝기·고정한 모델은 유지)
-  const SETTINGS_VER = 2;
-  const KEEP_ON_RESET = ["theme", "pinned"];
+  // 기본값을 바꾸면 이 번호를 올림 → 예전에 저장된 보기 설정은 한 번 새 기본값으로 바뀜 (고정한 모델은 유지)
+  const SETTINGS_VER = 3;
+  const KEEP_ON_RESET = ["pinned"];   // 되돌려도 고정한 모델은 남김
   let S = load();
   function load() {
     try {
@@ -89,7 +89,8 @@
   }
   if (!PER_CO_OPTIONS.includes(S.perCo)) S.perCo = 3;
   for (const k of ["top", "budget", "weight", "enabled"]) delete S[k];   // 예전 버전 설정은 버림
-  if (S.theme) document.documentElement.dataset.theme = S.theme;
+  document.documentElement.dataset.theme = S.theme || "dark";
+  document.querySelector('meta[name="theme-color"]').content = S.theme === "light" ? "#f5f4f0" : "#0b0b0c";
 
   // ───────── 도우미
   const $ = (sel) => document.querySelector(sel);
