@@ -410,6 +410,7 @@
     renderChart(list, points);
     renderPinBar();
     renderCards(points, SR);
+    renderMinimap(points);
     renderTable(list);
     renderDetail();
     syncControls();
@@ -455,6 +456,60 @@
         save(); render();
       };
     });
+  }
+
+  // ───────── 첫 화면 미니 지도: 지금 보이는 점과 가성비 경계선을 작게 (필터를 바꾸면 같이 바뀜)
+  let mmDrawn = false;
+  function renderMinimap(points) {
+    const el = $("#minimap");
+    if (!el) return;
+    const svg = el.querySelector("svg.mm");
+    const pts = points.filter((p) => p.x != null);
+    if (pts.length < 2 || !el.offsetParent) { svg.innerHTML = ""; return; }
+    const W = Math.max(160, Math.round(svg.clientWidth || 280)), H = Math.max(90, Math.round(svg.clientHeight || 110));
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const P = { l: 4, r: 6, t: 8, b: 6 };
+    const lx = pts.map((p) => Math.log10(p.x)), sy = pts.map((p) => p.v.score);
+    const x0 = Math.min(...lx), x1 = Math.max(...lx), y0 = Math.min(...sy), y1 = Math.max(...sy);
+    const X = (x) => P.l + ((Math.log10(x) - x0) / (x1 - x0 || 1)) * (W - P.l - P.r);
+    const Y = (y) => P.t + ((y1 - y) / (y1 - y0 || 1)) * (H - P.t - P.b);
+    const f = (n) => n.toFixed(1);
+    let h = "";
+    for (let i = 1; i < 4; i++) h += `<line class="mm-grid" x1="0" x2="${W}" y1="${f((H * i) / 4)}" y2="${f((H * i) / 4)}"/>`;
+    h += pts.map((p) => `<circle class="mm-dot" cx="${f(X(p.x))}" cy="${f(Y(p.v.score))}" r="1.7"/>`).join("");
+    const fr = FR.front;
+    if (fr.length >= 2) {
+      let d = `M${f(X(fr[0].x))} ${f(Y(fr[0].v.score))}`;
+      for (let i = 1; i < fr.length; i++) d += `H${f(X(fr[i].x))}V${f(Y(fr[i].v.score))}`;
+      d += `H${W - P.r}`;
+      h += `<path class="mm-area" d="${d}V${H}H${f(X(fr[0].x))}Z"/>`;
+      h += `<path class="mm-line" d="${d}"/>`;
+      h += fr.map((p) => `<circle class="mm-node" cx="${f(X(p.x))}" cy="${f(Y(p.v.score))}" r="2.6"/>`).join("");
+    }
+    svg.innerHTML = h;
+    const line = svg.querySelector(".mm-line");
+    if (line && !mmDrawn && !REDUCED) {   // 처음 한 번만 선이 그려지는 효과
+      const len = Math.ceil(line.getTotalLength());
+      line.style.setProperty("--len", len);
+      line.style.strokeDasharray = len;
+      line.classList.add("draw");
+      mmDrawn = true;
+    }
+  }
+
+  // ───────── 최근 30일 새 모델: 흐르는 띠 (누르면 그 모델 고정 + 상세)
+  function renderTicker(all) {
+    const el = $("#ticker");
+    if (!el) return;
+    const fresh = all.filter((M) => M.date && daysSince(M.date) <= 30).sort((a, b) => b.date.localeCompare(a.date) || b.best.score - a.best.score).slice(0, 24);
+    if (!fresh.length) { el.hidden = true; return; }
+    const item = (M, dup) => `<button type="button" class="tk-item" data-key="${esc(M.key)}"${dup ? ' tabindex="-1" aria-hidden="true"' : ""}>` +
+      `<span class="sw" style="background:${colorOf(M.company)}"></span><b>${esc(M.name)}</b>` +
+      `<span class="tk-meta">${esc(M.date.slice(5).replace("-", "."))} · ${M.best.score.toFixed(1)}</span></button>`;
+    el.innerHTML = `<span class="tk-label"><i></i>최근 30일 새 모델 <b>${fresh.length}</b></span>` +
+      `<div class="tk-track"><div class="tk-move" style="--dur:${Math.max(40, fresh.length * 5)}s">${fresh.map((M) => item(M)).join("")}${fresh.map((M) => item(M, true)).join("")}</div></div>`;
+    el.hidden = false;
+    el.onclick = (e) => { const b = e.target.closest(".tk-item"); if (b) pinAndShow(b.dataset.key); };
   }
 
   // ───────── 그래프 그리기
@@ -1121,12 +1176,11 @@
     setTimeout(() => $("#detail").scrollIntoView({ behavior: REDUCED ? "auto" : "smooth", block: "start" }), 480);
   }
   function renderPinBar() {
-    const el = $("#pinBar");
+    const el = $("#pinBar"), hint = $("#pinHint");
+    if (hint) hint.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v6l-2 3h10l-2-3V4M12 13v7"/></svg>${CAN_HOVER ? "점을 누르면 고정 · 여러 개 골라 비교" : "점을 누르면 설명, 한 번 더 누르면 고정"}`;
     el.innerHTML = "";
-    if (!S.pinned.length) {
-      el.innerHTML = `<span class="hint"><svg viewBox="0 0 24 24" style="width:14px;height:14px"><path d="M9 4v6l-2 3h10l-2-3V4M12 13v7"/></svg>${CAN_HOVER ? "점을 누르면 그 모델이 고정돼요" : "점을 누르면 설명, 한 번 더 누르면 고정돼요"}<span class="hint-x"> — 여러 개 골라 비교할 수 있어요</span></span>`;
-      return;
-    }
+    el.hidden = !S.pinned.length;   // 고정한 모델이 있을 때만 칩 줄을 보여 줌 (그래프 위 줄을 줄임)
+    if (!S.pinned.length) return;
     for (const key of S.pinned) {
       const M = VIEW.all.find((x) => x.key === key);
       if (!M) continue;
@@ -1289,7 +1343,7 @@
     cards.forEach((c, i) => {
       let card = el.children[i];
       if (!card) { card = document.createElement("div"); el.append(card); }
-      card.className = "pick pick-table";
+      card.className = "pick pick-table spot";
       card.dataset.kind = c.kind;
       card.style.setProperty("--pc", colorOf(c.v.m.company));
       card.innerHTML =
@@ -1473,7 +1527,7 @@
   for (const n of PER_CO_OPTIONS) {
     const b = document.createElement("button");
     b.type = "button"; b.className = "menu-item"; b.dataset.v = n;
-    b.textContent = n ? `회사마다 ${n}개` : "전부";
+    b.innerHTML = n ? `<span class="mi-pre">회사마다 </span>${n}개` : "전부";
     b.onclick = () => { S.perCo = n; save(); $("#perCoMenu").classList.remove("open"); render(); };
     perCoPop.append(b);
   }
@@ -1495,7 +1549,7 @@
 
   // 조절 막대가 위에 붙으면 아래 선 표시
   const dock = $("#dock");
-  const onScroll = () => dock.classList.toggle("stuck", dock.getBoundingClientRect().top <= 61 && window.scrollY > 40);
+  const onScroll = () => dock.classList.toggle("stuck", innerWidth > 700 && dock.getBoundingClientRect().top <= $(".topbar").offsetHeight + 1 && window.scrollY > 40);
   window.addEventListener("scroll", onScroll, { passive: true });
 
   // ───────── 그래프 도구 버튼
@@ -1548,12 +1602,22 @@
     if (chartBox.classList.contains("full")) setFull(false);
     else setZoomOn(false);
   });
-  $("#themeBtn").onclick = () => {
-    const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
-    S.theme = cur === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = S.theme;
-    document.querySelector('meta[name="theme-color"]').content = S.theme === "light" ? "#f4f3ee" : "#0a0b0d";
-    colorCache = {}; save(); render();
+  $("#themeBtn").onclick = (ev) => {
+    const flip = () => {
+      const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      S.theme = cur === "dark" ? "light" : "dark";
+      document.documentElement.dataset.theme = S.theme;
+      document.querySelector('meta[name="theme-color"]').content = S.theme === "light" ? "#f4f3ee" : "#0a0b0d";
+      colorCache = {}; save(); render();
+    };
+    // 누른 자리에서 새 색이 원으로 퍼지며 바뀜 (지원 안 되는 브라우저는 바로 바뀜)
+    if (!document.startViewTransition || REDUCED) return flip();
+    const r = ev.currentTarget.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+    const end = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+    const t = document.startViewTransition(flip);
+    t.ready.then(() => document.documentElement.animate(
+      { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${end}px at ${x}px ${y}px)`] },
+      { duration: 650, easing: "cubic-bezier(.2,.8,.2,1)", pseudoElement: "::view-transition-new(root)" })).catch(() => {});
   };
   matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => { if (!S.theme) render(); });
 
@@ -1703,6 +1767,75 @@
   $("#resetSettings").onclick = () => resetSettings();
   pickCompanies(computeAll());
   render();
+  try { renderTicker(VIEW.all); } catch (e) { /* 띠가 안 나와도 나머지는 그대로 */ }
+
+  // ───────── 휴대폰: 아래쪽 막대의 '조절' → 판이 위로 올라옴
+  const dockToggle = $("#dockToggle"), scrim = $("#dockScrim");
+  function setSheet(on) {
+    dock.classList.toggle("open", on);
+    scrim.hidden = !on;
+    document.body.classList.toggle("sheet-open", on);
+    dockToggle.setAttribute("aria-expanded", String(on));
+    dockToggle.setAttribute("aria-label", on ? "보기 조절 닫기" : "보기 조절 열기");
+    if (on) { requestAnimationFrame(syncSegs); setTimeout(syncSegs, 80); }
+  }
+  dockToggle.onclick = (e) => { e.stopPropagation(); setSheet(!dock.classList.contains("open")); };
+  scrim.onclick = () => setSheet(false);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && dock.classList.contains("open")) setSheet(false); });
+  matchMedia("(max-width: 700px)").addEventListener("change", (m) => { if (!m.matches) setSheet(false); });
+
+  // ───────── PC: 순위표 제목 줄이 조절 막대 바로 아래에 붙도록 막대 높이를 알려 줌
+  const setDockH = () => document.documentElement.style.setProperty("--dock-h", (innerWidth > 700 ? dock.offsetHeight : 0) + "px");
+  setDockH();
+  if (window.ResizeObserver) new ResizeObserver(setDockH).observe(dock);
+
+  // ───────── 맨 위 길잡이: 지금 읽는 구역 표시 (선택 표시가 미끄러지듯 이동)
+  (function topNav() {
+    const nav = $("#topnav");
+    if (!nav) return;
+    const links = Array.from(nav.querySelectorAll("a")), ind = nav.querySelector(".tn-ind");
+    const secs = links.map((a) => document.getElementById(a.getAttribute("href").slice(1)));
+    let cur = -1;
+    const place = () => {
+      const a = links[cur];
+      if (!a || !a.offsetWidth) return;
+      ind.style.width = a.offsetWidth + "px";
+      ind.style.transform = `translateX(${a.offsetLeft - 3}px)`;
+      nav.classList.add("ready");
+    };
+    const update = () => {
+      const line = $(".topbar").offsetHeight + innerHeight * 0.3;
+      let i = 0;
+      secs.forEach((s, k) => { if (s && s.getBoundingClientRect().top <= line) i = k; });
+      if (innerHeight + scrollY >= document.documentElement.scrollHeight - 4) i = secs.length - 1;   // 맨 아래면 마지막 구역
+      if (i === cur) return;
+      cur = i;
+      links.forEach((a, k) => { a.classList.toggle("on", k === i); if (k === i) a.setAttribute("aria-current", "true"); else a.removeAttribute("aria-current"); });
+      place();
+    };
+    let tick = false;
+    window.addEventListener("scroll", () => { if (!tick) { tick = true; requestAnimationFrame(() => { tick = false; update(); }); } }, { passive: true });
+    window.addEventListener("resize", place);
+    update();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(place);
+  })();
+
+  // ───────── 카드·타일: 마우스를 따라가는 은은한 빛
+  document.addEventListener("pointermove", (e) => {
+    const t = e.pointerType === "mouse" && e.target.closest ? e.target.closest(".spot") : null;
+    if (!t) return;
+    const r = t.getBoundingClientRect();
+    t.style.setProperty("--mx", (e.clientX - r.left).toFixed(0) + "px");
+    t.style.setProperty("--my", (e.clientY - r.top).toFixed(0) + "px");
+  }, { passive: true });
+
+  // ───────── 스크롤하면 구역이 떠오름
+  window.__rvReady = true;
+  if (document.documentElement.classList.contains("io")) {
+    const io = new IntersectionObserver((ents) => ents.forEach((en) => { if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); } }), { rootMargin: "0px 0px -6% 0px" });
+    $$(".rv").forEach((el) => io.observe(el));
+  }
+  window.addEventListener("resize", () => { clearTimeout(renderMinimap.t); renderMinimap.t = setTimeout(() => VIEW && renderMinimap(VIEW.points), 200); });
   // 글꼴(계기판 숫자·한글)이 늦게 도착하면 그래프 글자를 한 번 더 그림 (그래프는 그림이라 글꼴이 자동으로 안 바뀜)
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (VIEW) { quietRender = true; renderChart(VIEW.list, VIEW.points); quietRender = false; } });
   fitChartHeight();
