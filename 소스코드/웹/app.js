@@ -243,7 +243,21 @@
 
   // ───────── 그리기
   const chart = echarts.init($("#chart"), null, { renderer: "canvas" });
-  window.addEventListener("resize", () => chart.resize());
+  const isNarrow = () => chartEl0.clientWidth < 560;
+  const chartEl0 = document.getElementById("chart");
+  let renderedNarrow = null, resizeTimer = null;
+  function onChartResize() {
+    chart.resize();
+    // 휴대폰을 돌려서 좁음↔넓음이 바뀌면, 화면 크기가 다 바뀐 뒤 여백·이름표 위치를 다시 계산
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      chart.resize();
+      if (VIEW && renderedNarrow !== isNarrow()) renderChart(VIEW.list, VIEW.points);
+    }, 150);
+  }
+  window.addEventListener("resize", onChartResize);
+  // 창 크기 신호가 안 와도(화면 회전·크게 보기 등) 그래프 칸 크기가 바뀌면 맞춰 다시 그림
+  if (window.ResizeObserver) new ResizeObserver(() => onChartResize()).observe(chartEl0);
   let VIEW = null;
 
   function render() {
@@ -263,6 +277,7 @@
   }
 
   function renderChart(list, points) {
+    renderedNarrow = isNarrow();
     const txt = css("--text"), txt2 = css("--text-2"), muted = css("--muted"), grid = css("--grid"), axis = css("--axis"), surf = css("--surface");
     const series = [];
     const labelled = new Set(list.slice(0, S.labels ? 40 : 0).map((M) => M.key));
@@ -292,7 +307,7 @@
               formatter: isTop ? `${M.name} · ${p.v.eff}` : p.v.eff,
               color: isTop ? txt : txt2, fontSize: isTop ? 12 : 10, fontWeight: isTop ? 700 : 400, fontFamily: font,
             } : isTop && labelled.has(M.key) && !dim ? {
-              show: true, position: "right", distance: 6, formatter: M.name + (daysSince(M.date) <= 30 ? " ·NEW" : ""),
+              show: true, position: isNarrow() ? "top" : "right", distance: isNarrow() ? 4 : 6, formatter: M.name + (daysSince(M.date) <= 30 && !isNarrow() ? " ·NEW" : ""),
               color: txt2, fontSize: 11, fontFamily: font,
             } : { show: false },
             // 마우스를 올리면: 가장 높은 점에 모델 이름, 나머지 점에 등급 (흐려진 선도 진하게)
@@ -410,7 +425,9 @@
       },
       series,
     }, { notMerge: true });
-    if (window.innerWidth < 700) chart.setOption({ grid: { right: 84, left: 36 } });   // 휴대폰: 오른쪽 이름표 자리 남기기
+    if (isNarrow()) chart.setOption({ grid: { right: 12, left: 34, top: 14, bottom: 40 } });   // 휴대폰: 최대한 넓게
+    // 크게 보기: 위쪽에 떠 있는 버튼 자리만 남기고 그래프를 끝까지
+    if (document.querySelector(".chart-box.full")) chart.setOption({ grid: { top: window.innerWidth <= 700 && S.pinned.length ? 76 : 44, bottom: 36 } });
     updateZoomUi();
   }
 
@@ -652,7 +669,12 @@
 
   // 점이든 선이든 마우스를 올리면 그 모델 전체(모든 등급 점 + 이름)를 강조
   let hoverSeries = null;
+  const CAN_HOVER = matchMedia("(hover: hover)").matches;
+  chart.getZr().on("click", (e) => {
+    if (!e.target) { chart.dispatchAction({ type: "downplay" }); chart.dispatchAction({ type: "hideTip" }); hoverSeries = null; }
+  });
   chart.on("mouseover", (p) => {
+    if (!CAN_HOVER) return;
     if (p.seriesType !== "line" || !seriesKey(p)) return;
     if (hoverSeries === p.seriesIndex) return;
     if (hoverSeries != null) chart.dispatchAction({ type: "downplay", seriesIndex: hoverSeries });
@@ -687,7 +709,10 @@
       S.selected = key; S.selEffort = effort || null;
     }
     save(); render();
-    if (S.selected === key && window.innerWidth < 1000) $("#detail").scrollIntoView({ behavior: "smooth", block: "start" });
+    if (S.selected === key && !document.querySelector(".chart-box.full")) {
+      const r = $("#detail").getBoundingClientRect();
+      if (r.top > window.innerHeight - 80) window.scrollBy({ top: Math.min(r.top - window.innerHeight + 260, r.top - 20), behavior: "smooth" });
+    }
   }
   // 카드에서 누르면 고정(해제는 안 함)하고 상세 보기
   function pinAndShow(key, effort) {
@@ -860,6 +885,7 @@
   function renderDetail() {
     const el = $("#detail");
     const M = VIEW && VIEW.all.find((x) => x.key === S.selected);
+    el.classList.toggle("open", !!M);
     if (!M) {
       el.innerHTML = `<div class="detail-empty"><p><b>점을 눌러보세요.</b></p><p>모델의 등급별 점수와 비용, 기관별 점수를 자세히 볼 수 있습니다.</p><p class="muted">마우스 휠로 확대, 끌어서 이동할 수 있습니다. 점에 마우스를 올리면 같은 모델만 강조됩니다.</p></div>`;
       return;
@@ -871,7 +897,8 @@
       (m.price ? `<br>가격표: 입력 $${m.price.in} · 출력 $${m.price.out} <span class="muted">(100만 토큰당)</span>` : "") +
       (m.eci ? `<br>Epoch 공식 능력치(최고 등급 기준): ${m.eci}` : "") + `</div>`;
 
-    h += `<div class="sect">추론 등급별</div><table class="dt"><thead><tr><th>등급</th><th class="num">점수</th><th class="num">문제당 비용<br><span class="muted">맞힌 문제당</span></th><th>올리면</th></tr></thead><tbody>`;
+    h += `<div class="dcols"><div class="dcol">`;
+    h += `<div class="sect">추론 등급별 <span class="muted small">(줄을 누르면 오른쪽 설명이 그 등급으로 바뀜)</span></div><table class="dt"><thead><tr><th>등급</th><th class="num">점수</th><th class="num">문제당 비용<br><span class="muted">맞힌 문제당</span></th><th>올리면</th></tr></thead><tbody>`;
     M.vs.forEach((v, i) => {
       const prev = M.vs[i - 1];
       let step = "";
@@ -884,7 +911,7 @@
       h += `<tr${sel} data-e="${esc(v.effort)}" class="eff-row${S.selEffort === v.effort ? " hl" : ""}"><td><b>${esc(v.eff)}</b>${v.eff !== v.effortKo ? `<br><span class="muted small">${esc(v.effortKo)}</span>` : ""}${v.isDefault ? ' <span class="badge def">기본값</span>' : ""}${!canSelect(m, v.effort) ? ' <span class="badge est">선택 불가</span>' : ""}</td><td class="num"><b>${v.score.toFixed(1)}</b><span class="muted small"> ±${v.se.toFixed(1)}</span></td>` +
         `<td class="num">${fmtCost(v.cost)}${v.costOk != null ? `<br><span class="muted small">${fmtCost(v.costOk)}</span>` : ""}${v.costKind && v.costKind !== "측정" ? `<br><span class="badge est">${esc(v.costKind)}</span>` : ""}</td><td>${step}</td></tr>`;
     });
-    h += `</tbody></table>`;
+    h += `</tbody></table></div><div class="dcol">`;
 
     const v = M.vs.find((x) => x.effort === S.selEffort) || M.best;
     // 이 등급을 실제로 설정하는 방법
@@ -895,7 +922,7 @@
     const sup = m.efforts_supported;
     if (sup && sup.length) h += `<div class="note">이 모델에서 고를 수 있는 등급: ${sup.slice().sort((a, b) => effIdx(a) - effIdx(b)).map((e) => esc(effLabel(m.key ? m : M.m, e))).join(" · ")}${defaultEffort(m) ? ` (기본값: ${esc(effLabel(m, defaultEffort(m)))})` : ""}</div>`;
     if (g && g.note) h += `<div class="note">${esc(g.note)}</div>`;
-    h += `</div>`;
+    h += `</div></div><div class="dcol">`;
     h += `<div class="sect">기관별 점수 — ${esc(v.eff)}</div><div class="srcbars">`;
     const lo = 130, hi = 175;
     for (const p of v.parts) {
@@ -909,6 +936,7 @@
     if (v.disagree != null) h += `<div class="note">기관 간 의견 차이: <b>${v.disagree.toFixed(1)}점</b> ${v.disagree > 6 ? "— 기관마다 평가가 꽤 다릅니다" : v.disagree > 3 ? "— 약간 다릅니다" : "— 대체로 일치합니다"}</div>`;
     if (v.costSrc && v.costSrc.length) h += `<div class="note">비용 측정 출처: ${v.costSrc.map(esc).join(", ")}</div>`;
     if (M.m.price && M.m.price.id) h += `<div class="note">모델 ID: ${esc(M.m.price.id)}</div>`;
+    h += `</div></div>`;
     el.innerHTML = h;
     $("#closeDetail").onclick = () => { S.selected = null; save(); renderDetail(); renderPinBar(); };
     el.querySelectorAll("tr.eff-row").forEach((tr) => {
@@ -974,6 +1002,18 @@
   $("#budget").oninput = (e) => { S.budget = +e.target.value; $("#budgetOut").textContent = fmtCost(10 ** S.budget); };
   $("#budget").onchange = (e) => { S.budget = +e.target.value; save(); render(); };
   $("#resetZoom").onclick = () => resetView();
+  // 크게 보기: 그래프가 화면 전체를 채움. 휴대폰은 가로로 돌리면 더 넓게. 뒤로 가기로 닫힘
+  const chartBox = document.querySelector(".chart-box");
+  function setFull(on, fromPop) {
+    chartBox.classList.toggle("full", on);
+    document.body.classList.toggle("no-scroll", on);
+    $("#fullBtn").textContent = on ? "닫기" : "크게 보기";
+    if (on && !fromPop) history.pushState({ full: 1 }, "");
+    if (!on && !fromPop && history.state && history.state.full) history.back();
+    setTimeout(() => { chart.resize(); if (VIEW) renderChart(VIEW.list, VIEW.points); }, 60);
+  }
+  $("#fullBtn").onclick = () => setFull(!chartBox.classList.contains("full"));
+  window.addEventListener("popstate", () => { if (chartBox.classList.contains("full")) setFull(false, true); });
   $("#zoomIn").onclick = () => zoomCenter(0.7);
   $("#zoomOut").onclick = () => { if (VIEWBOX) zoomCenter(1 / 0.7); };
   $("#themeBtn").onclick = () => {

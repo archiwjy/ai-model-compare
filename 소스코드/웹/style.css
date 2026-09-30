@@ -305,3 +305,49 @@ tr.eff-row:hover td { background: var(--surface-2); }
   .ctl-label { min-width: 84px; }
   .budget-ctl input[type=range] { flex: 1; width: auto; }
 }
+
+/* ───── 그래프를 화면 가로 가득 (PC) ───── */
+.page { max-width: none; padding: 20px 24px 48px; }
+.main { grid-template-columns: minmax(0, 1fr) !important; }
+.chart { height: clamp(520px, calc(100vh - 300px), 820px); }
+/* 상세 칸: 그래프 아래, 모델을 눌렀을 때만 */
+.detail { max-height: none; display: none; }
+.detail.open { display: block; }
+.dcols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 8px 32px; align-items: start; }
+.dcol { min-width: 0; }
+
+/* ───── 크게 보기 (화면 전체) ───── */
+body.no-scroll { overflow: hidden; }
+.chart-box.full {
+  position: fixed; inset: 0; z-index: 100; border-radius: 0; border: 0;
+  padding: 8px 8px 4px; display: flex; flex-direction: column; background: var(--surface);
+}
+.chart-box.full .chart { flex: 1; height: auto; min-height: 0; }
+.chart-box.full .chart-title { display: none; }
+.chart-box.full .chart-foot #chartFoot { display: none; }
+
+/* ───── 휴대폰: 그래프 최대한 넓게 ───── */
+@media (max-width: 700px) {
+  .page { padding: 12px 10px 40px; }
+  .chart-box { padding: 8px 2px 4px; border-radius: 10px; }
+  .chart { height: clamp(420px, 68vh, 640px); }
+  .chart-head { flex-wrap: wrap; padding: 0 6px 4px; }
+  .chart-title { font-size: 12px; flex: 1 1 100%; }
+  .zoom-ctl { margin-left: auto; }
+  .pinbar { padding: 2px 6px 6px; }
+  .chart-foot { padding: 2px 8px; }
+}
+
+/* 크게 보기: 버튼·비교 목록을 그래프 위에 작게 띄움 (그래프 높이 최대로) */
+.chart-box.full { padding: 0; }
+.chart-box.full .chart-head { position: absolute; top: 6px; right: 8px; z-index: 3; padding: 0; }
+.chart-box.full .pinbar {
+  position: absolute; top: 6px; left: 8px; z-index: 3; right: 250px; min-height: 0; padding: 0;
+  flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+}
+.chart-box.full .pinbar::-webkit-scrollbar { display: none; }
+.chart-box.full .pinbar > .muted { display: none; }
+.chart-box.full .pin { flex: none; font-size: 12px; background: var(--surface-2); }
+.chart-box.full .chart-foot { display: none; }
+.chart-box.full .chart { height: 100%; }
+@media (max-width: 700px) { .chart-box.full .pinbar { right: 8px; top: 40px; } }
