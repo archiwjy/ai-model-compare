@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+소스코드/웹/data.js
+소스코드/웹/data.json
+_site/

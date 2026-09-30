@@ -1,0 +1,71 @@
+# GitHub 자동 실행 설정 (저장소의 .github/workflows/update.yml 로 복사됨)
+# 6시간마다: 4곳에서 최신 점수를 받아 계산 → 사이트 갱신
+name: 데이터 갱신 및 사이트 올리기
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"      # 6시간마다 (한국 시간 3·9·15·21시 17분쯤)
+  workflow_dispatch:            # GitHub 화면에서 직접 실행
+  push:
+    branches: [main]            # 코드가 바뀌면 바로 실행
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Seoul
+      PYTHONIOENCODING: utf-8
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 데이터 모으고 계산하기
+        env:
+          AA_API_KEY: ${{ secrets.AA_API_KEY }}
+          CACHE_DIR: ${{ runner.temp }}/cache
+        run: python 소스코드/collect.py
+      - name: 사이트 파일 묶기
+        env:
+          AA_API_KEY: ${{ secrets.AA_API_KEY }}
+        run: python 소스코드/build_site.py _site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  # GitHub 는 60일 동안 저장소에 변화가 없으면 예약 실행을 멈춘다 → 45일마다 빈 기록을 남겨 계속 돌게 함
+  keepalive:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 예약 실행 유지
+        run: |
+          last=$(git log -1 --format=%ct)
+          now=$(date +%s)
+          if [ $(( (now - last) / 86400 )) -ge 45 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "자동 유지: 예약 실행이 멈추지 않도록"
+            git push
+          fi

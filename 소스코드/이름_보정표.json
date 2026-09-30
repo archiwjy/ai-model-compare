@@ -1,0 +1,18 @@
+{
+  "설명": "출처마다 모델 이름이 달라서 자동으로 못 맞추는 경우 여기에 손으로 적는다. 왼쪽 이름을 오른쪽 이름으로 바꾼다.",
+  "기본이름_별칭": {
+    "kimi-k2p5": "kimi-k2-5",
+    "gemini-3-pro-preview": "gemini-3-pro"
+  },
+  "max가_이름인_모델": [
+    "^qwen[0-9\\-]*$",
+    "^qwen[0-9\\-]*-preview$"
+  ],
+  "제외할_이름_포함어": [
+    "pre-release",
+    "preview-early",
+    "-early",
+    "web-app",
+    "multi-agent"
+  ]
+}
