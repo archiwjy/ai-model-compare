@@ -280,6 +280,36 @@
     renderedNarrow = isNarrow();
     const txt = css("--text"), txt2 = css("--text-2"), muted = css("--muted"), grid = css("--grid"), axis = css("--axis"), surf = css("--surface");
     const series = [];
+    // 전체 범위 (확대 안 했을 때 보이는 범위)
+    const xs = points.map((p) => p.x).filter((x) => x != null);
+    const ys = points.filter((p) => p.x != null).map((p) => p.v.score);
+    const y0 = ys.length ? Math.floor(Math.min(...ys) - 2) : 100;
+    const y1 = ys.length ? Math.ceil(Math.max(...ys) + 2) : 170;
+    let x0, x1;
+    if (S.x === "date") {
+      const ts = xs.map((d) => Date.parse(d)).filter((t) => !isNaN(t));
+      const a = ts.length ? Math.min(...ts) : Date.now() - 365 * 864e5, b = ts.length ? Math.max(...ts) : Date.now();
+      const pad = Math.max((b - a) * 0.04, 7 * 864e5);
+      x0 = a - pad; x1 = b + pad;
+    } else {
+      const lo = xs.length ? Math.min(...xs) : 0.01, hi = xs.length ? Math.max(...xs, isCostAxis() ? 10 ** S.budget : 0) : 1;
+      // 점이 있는 범위에 딱 맞추고 양쪽에 조금만 여유 (10배 단위로 반올림하면 빈 공간이 크게 생김)
+      const a = Math.log10(lo), b = Math.log10(hi);
+      const pad = Math.max(0.06, (b - a) * 0.03);
+      x0 = 10 ** (a - pad); x1 = 10 ** (b + pad);
+    }
+    FULL = { x0, x1, y0, y1 };
+    if (viewKind !== S.x) { VIEWBOX = null; viewKind = S.x; }
+    VIEWBOX = clampView(VIEWBOX);
+    const V = VIEWBOX || FULL;
+    // 오른쪽 끝 가까운 점은 이름표를 점 왼쪽에 (그래프를 끝까지 쓰면서 이름이 잘리지 않게)
+    const nearRight = (x) => {
+      if (isNarrow() || x == null) return false;
+      const a0 = tx(V.x0), a1 = tx(V.x1);
+      const xv = S.x === "date" ? Date.parse(x) : x;
+      return (tx(xv) - a0) / (a1 - a0) > 0.8;
+    };
+    const sidePos = (x) => (isNarrow() ? "top" : nearRight(x) ? "left" : "right");
     const labelled = new Set(list.slice(0, S.labels ? 40 : 0).map((M) => M.key));
     const pinSet = new Set(S.pinned);
     const anyPin = pinSet.size > 0;
@@ -303,18 +333,18 @@
             itemStyle: Object.assign(hollow ? { color: surf, borderColor: col, borderWidth: 2 } : { color: col, borderColor: surf, borderWidth: 1.5 }, { opacity: dim ? 0.18 : 1 }),
             label: pinned ? {
               // 고정한 모델: 모든 점에 등급, 가장 높은 점에는 이름까지
-              show: true, position: "right", distance: 6,
+              show: true, position: sidePos(p.x), distance: 6,
               formatter: isTop ? `${M.name} · ${p.v.eff}` : p.v.eff,
               color: isTop ? txt : txt2, fontSize: isTop ? 12 : 10, fontWeight: isTop ? 700 : 400, fontFamily: font,
             } : isTop && labelled.has(M.key) && !dim ? {
-              show: true, position: isNarrow() ? "top" : "right", distance: isNarrow() ? 4 : 6, formatter: M.name + (daysSince(M.date) <= 30 && !isNarrow() ? " ·NEW" : ""),
+              show: true, position: sidePos(p.x), distance: isNarrow() ? 4 : 6, formatter: M.name + (daysSince(M.date) <= 30 && !isNarrow() ? " ·NEW" : ""),
               color: txt2, fontSize: 11, fontFamily: font,
             } : { show: false },
             // 마우스를 올리면: 가장 높은 점에 모델 이름, 나머지 점에 등급 (흐려진 선도 진하게)
             emphasis: {
               itemStyle: { opacity: 1 },
               label: {
-                show: true, position: "right", distance: 6, fontFamily: font,
+                show: true, position: sidePos(p.x), distance: 6, fontFamily: font,
                 formatter: isTop ? `${M.name} · ${p.v.eff}` : p.v.eff,
                 color: isTop ? txt : txt2, fontSize: isTop ? 12 : 10, fontWeight: isTop ? 700 : 400, opacity: 1,
               },
@@ -360,28 +390,6 @@
       });
     }
 
-    // 전체 범위 (확대 안 했을 때 보이는 범위)
-    const xs = points.map((p) => p.x).filter((x) => x != null);
-    const ys = points.filter((p) => p.x != null).map((p) => p.v.score);
-    const y0 = ys.length ? Math.floor(Math.min(...ys) - 2) : 100;
-    const y1 = ys.length ? Math.ceil(Math.max(...ys) + 2) : 170;
-    let x0, x1;
-    if (S.x === "date") {
-      const ts = xs.map((d) => Date.parse(d)).filter((t) => !isNaN(t));
-      const a = ts.length ? Math.min(...ts) : Date.now() - 365 * 864e5, b = ts.length ? Math.max(...ts) : Date.now();
-      const pad = Math.max((b - a) * 0.04, 7 * 864e5);
-      x0 = a - pad; x1 = b + pad;
-    } else {
-      const lo = xs.length ? Math.min(...xs) : 0.01, hi = xs.length ? Math.max(...xs, isCostAxis() ? 10 ** S.budget : 0) : 1;
-      // 점이 있는 범위에 딱 맞추고 양쪽에 조금만 여유 (10배 단위로 반올림하면 빈 공간이 크게 생김)
-      const a = Math.log10(lo), b = Math.log10(hi);
-      const pad = Math.max(0.06, (b - a) * 0.03);
-      x0 = 10 ** (a - pad); x1 = 10 ** (b + pad);
-    }
-    FULL = { x0, x1, y0, y1 };
-    if (viewKind !== S.x) { VIEWBOX = null; viewKind = S.x; }
-    VIEWBOX = clampView(VIEWBOX);
-    const V = VIEWBOX || FULL;
     let xAxis;
     if (S.x === "date") {
       xAxis = Object.assign({
@@ -403,8 +411,9 @@
 
     chart.setOption({
       backgroundColor: "transparent",
+      animation: !quietRender,
       textStyle: { fontFamily: "Pretendard Variable, Pretendard, Malgun Gothic, sans-serif" },
-      grid: { left: 52, right: 128, top: 20, bottom: 48 },
+      grid: { left: 52, right: 18, top: 20, bottom: 48 },
       xAxis: Object.assign(xAxis, { name: "", nameLocation: "middle" }),
       yAxis: {
         type: "value", min: V.y0, max: V.y1,
@@ -515,7 +524,11 @@
     opt.xAxis = S.x === "date" ? dateAxisView(V, css("--muted")) : logAxisView(V, css("--muted"));
     chart.setOption(opt, { silent: true });
     updateZoomUi();
+    // 확대·이동이 멈추면 이름표 방향(왼쪽/오른쪽)을 다시 계산
+    clearTimeout(labelTimer);
+    labelTimer = setTimeout(() => { if (VIEW) { quietRender = true; renderChart(VIEW.list, VIEW.points); quietRender = false; } }, 350);
   }
+  let labelTimer = null, quietRender = false;
   function applyView() {
     if (document.visibilityState === "hidden") return drawView();
     if (rafPending) return;
