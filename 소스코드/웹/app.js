@@ -556,14 +556,19 @@
   chartEl.addEventListener("pointerdown", (e) => { if (e.pointerType !== "touch") setZoomOn(true); }, true);
   document.addEventListener("pointerdown", (e) => { if (!chartBox.contains(e.target) && !chartBox.classList.contains("full")) setZoomOn(false); });
   chartBox.addEventListener("mouseleave", () => { if (!chartBox.classList.contains("full")) setZoomOn(false); });
+  // 확대 모드일 때는 그래프 칸 어디서 휠을 굴려도 페이지가 스크롤되지 않게 막는다
+  chartBox.addEventListener("wheel", (e) => { if (zoomOn) e.preventDefault(); }, { passive: false });
   chartEl.addEventListener("wheel", (e) => {
     const rect = chartEl.getBoundingClientRect();
     const px = e.clientX - rect.left, py = e.clientY - rect.top;
-    if (!FULL || !inGrid(px, py)) return;
-    if (!zoomOn) { showToast("그래프를 한 번 클릭하면 휠로 확대할 수 있어요"); return; }   // 페이지는 그대로 스크롤
-    const zoomOut = e.deltaY > 0;
-    if (zoomOut && !VIEWBOX) return;
+    if (!zoomOn) {
+      if (FULL && inGrid(px, py)) showToast("그래프를 한 번 클릭하면 휠로 확대할 수 있어요");   // 페이지는 그대로 스크롤
+      return;
+    }
     e.preventDefault();
+    if (!FULL || !inGrid(px, py)) return;
+    const zoomOut = e.deltaY > 0;
+    if (zoomOut && !VIEWBOX) return;   // 이미 다 축소됨 → 아무 일도 안 함 (페이지도 안 움직임)
     const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
     const f = Math.min(1.6, Math.max(0.6, Math.exp(dy * 0.0022)));
     zoomAt(px, py, f, e.shiftKey ? "x" : e.altKey ? "y" : "xy");
