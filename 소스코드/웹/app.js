@@ -373,6 +373,8 @@
   const chartBox = $("#chartBox");
   const chart = echarts.init(chartEl, null, { renderer: "canvas" });
   const isNarrow = () => chartEl.clientWidth < 560;
+  // 지도 배치 (첫 화면 전체가 지도): 가로 1024 이상 · 세로 620 이상 — style.css 와 같은 기준
+  const MAPMODE = () => matchMedia("(min-width: 1024px) and (min-height: 620px)").matches;
   let renderedNarrow = null, resizeTimer = null, VIEW = null;
   let FR = { front: [], status: new Map(), k: 0, levelAt: () => -Infinity };
   let hoverCo = null;   // 위 회사 버튼에 마우스를 올린 회사 → 그래프에서 그 회사만 강조
@@ -381,7 +383,7 @@
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       chart.resize();
-      if (VIEW && renderedNarrow !== isNarrow()) renderChart(VIEW.list, VIEW.points);
+      if (VIEW && (renderedNarrow !== isNarrow() || MAPMODE())) { quietRender = true; renderChart(VIEW.list, VIEW.points); quietRender = false; placeCallouts(); }
       syncSegs();
     }, 150);
   }
@@ -407,9 +409,10 @@
     }
     renderSearchNote(SR);
     renderLegend(all, found);
-    renderChart(list, points);
     renderPinBar();
+    renderChart(list, points);
     renderCards(points, SR);
+    placeCallouts();
     renderMinimap(points);
     renderTable(list);
     renderDetail();
@@ -504,7 +507,7 @@
     const fresh = all.filter((M) => M.date && daysSince(M.date) <= 30).sort((a, b) => b.date.localeCompare(a.date) || b.best.score - a.best.score).slice(0, 24);
     if (!fresh.length) { el.hidden = true; return; }
     const item = (M, dup) => `<button type="button" class="tk-item" data-key="${esc(M.key)}"${dup ? ' tabindex="-1" aria-hidden="true"' : ""}>` +
-      `<span class="sw" style="background:${colorOf(M.company)}"></span><b>${esc(M.name)}</b>` +
+      `<span class="sym">${symbolSvg(styleOf(M.company).sym)}</span><b>${esc(M.name)}</b>` +
       `<span class="tk-meta">${esc(M.date.slice(5).replace("-", "."))} · ${M.best.score.toFixed(1)}</span></button>`;
     el.innerHTML = `<span class="tk-label"><i></i>최근 30일 새 모델 <b>${fresh.length}</b></span>` +
       `<div class="tk-track"><div class="tk-move" style="--dur:${Math.max(40, fresh.length * 5)}s">${fresh.map((M) => item(M)).join("")}${fresh.map((M) => item(M, true)).join("")}</div></div>`;
@@ -513,15 +516,15 @@
   }
 
   // ───────── 그래프 그리기
-  let quietRender = false;
+  let quietRender = false, chartDrawn = false;
+  let LAST = { lines: [], blocks: [], G: null }, SIDX = new Map();   // 마지막으로 그린 그래프의 경계선 구간·비울 자리·칸, 모델별 선 번호
   // ───────── 이름표 자리 정하기
   //  중요한 것부터(고정한 모델 > 회사 강조 > 경계선 위 모델 > 점수 높은 순) 오른쪽·왼쪽·위·아래 중
   //  다른 이름표와 겹치지 않는 자리를 찾아 붙인다. 자리가 없으면 숨김 (고정한 모델은 항상 표시)
   const measureCtx = document.createElement("canvas").getContext("2d");
   function placeLabels(series, V, narrow, st) {
     const W = chartEl.clientWidth, H = chartEl.clientHeight;
-    const full = chartBox.classList.contains("full");
-    const g = narrow ? { l: 34, r: 12, t: full && S.pinned.length ? 70 : 22, b: 30 } : { l: 46, r: 18, t: 24, b: 34 };
+    const g = { l: st.G.left, r: st.G.right, t: st.G.top, b: st.G.bottom };   // 그래프 안쪽 칸 (renderChart 와 같은 값)
     const gw = W - g.l - g.r, gh = H - g.t - g.b;
     if (gw <= 0 || gh <= 0) return;
     const ax = tx(V.x0), bx = tx(V.x1);
@@ -582,11 +585,22 @@
   function renderChart(list, points) {
     renderedNarrow = isNarrow();
     // 경계선 색 = 신호색(연두). 이 색은 경계선·가성비에만 쓴다
-    const txt = css("--text"), txt2 = css("--text-2"), muted = css("--muted"), grid = css("--grid"), axis = css("--axis"), surf = css("--surface"), ink = css("--acc");
+    const txt = css("--text"), txt2 = css("--text-2"), muted = css("--muted"), grid = css("--grid"), axis = css("--axis"), ink = css("--acc");
+    const dotC = css("--dot"), dotLine = css("--dot-line");   // 평소 점·선은 흑백 — 회사 색은 '지금 보고 있는 것'(마우스·고정)에만
     const font = "Pretendard Variable, Pretendard, Malgun Gothic, sans-serif";
     const mono = "JetBrains Mono, Pretendard Variable, Pretendard, Consolas, monospace";   // 눈금 숫자는 계기판처럼 고정폭
     const narrow = isNarrow();
-    const halo = css("--surface");   // 글자 테두리: 선이 지나가도 이름이 잘 읽히게
+    const mapMode = MAPMODE(), full = chartBox.classList.contains("full");
+    const surf = mapMode ? css("--bg") : css("--surface");   // 점 테두리·글자 테두리 = 바탕색 (지도 배치는 바탕이 곧 페이지)
+    const halo = surf;   // 글자 테두리: 선이 지나가도 이름이 잘 읽히게
+    // 그래프 안쪽 칸 — 지도 배치: 화면 가득 (위: 맨 위 막대·회사 목록, 오른쪽: 지도 도구, 아래: 눈금·명령 막대)
+    const bars = $(".map-bars"), barsH = mapMode && bars && bars.offsetHeight ? bars.offsetHeight + 8 : 0;
+    const noteCol = mapMode && !full ? 330 + 24 + 40 : 0;   // 오른쪽 여백 = 답 카드 자리 (여백 주석)
+    const G = mapMode
+      ? { left: 58, right: full ? 30 : Math.max(40, noteCol), top: (full ? 56 : $(".topbar").offsetHeight + 48) + barsH, bottom: full ? 64 : 128 }
+      : narrow ? { left: 34, right: 12, top: full && S.pinned.length ? 70 : 22, bottom: 30 } : { left: 46, right: 18, top: 24, bottom: 34 };
+    const firstDraw = !chartDrawn;
+    chartDrawn = true;
 
     // 전체 범위: 점이 있는 곳에 딱 맞추고 조금만 여유
     const xs = points.map((p) => p.x).filter((x) => x != null);
@@ -605,7 +619,26 @@
       const pad = Math.max(0.06, (b - a) * 0.03);
       x0 = 10 ** (a - pad); x1 = 10 ** (b + pad);
     }
-    FULL = { x0, x1, y0, y1 };
+    // 지도 배치: 제목이 놓인 왼쪽 위(= 경계선 위의 빈 곳, '아직 아무도 없는 곳')에 점이 들어오지 않도록 세로 눈금 위쪽에 여유를 줌
+    let y1v = y1, headOver = false;
+    const headEl = $("#mapHead");
+    const quiet = mapMode && barsH > 0;   // 검색·고정 중: 제목을 치우고 지도를 넓게
+    document.body.classList.toggle("map-quiet", quiet);
+    if (mapMode && !full && !quiet && headEl && xs.length) {
+      const hr = headEl.getBoundingClientRect(), cr = chartEl.getBoundingClientRect();
+      const hx = hr.right - cr.left + 16, hb = hr.bottom - cr.top + 18;
+      const gw0 = chartEl.clientWidth - G.left - G.right, gh0 = chartEl.clientHeight - G.top - G.bottom;
+      const la = Math.log10(x0), lb = Math.log10(x1);
+      let F = -Infinity;   // 제목 오른쪽 끝보다 싼 점들 중 가장 높은 점수 (= 그 지점의 경계선 높이)
+      for (const p of points) if (p.x != null && G.left + ((Math.log10(p.x) - la) / (lb - la)) * gw0 <= hx) F = Math.max(F, p.v.score);
+      const r = (hb - G.top) / gh0;
+      if (F > -Infinity && r > 0 && r < 0.85) {
+        const need = (F - r * y0) / (1 - r);
+        if (need > y1) { if (need - y1 <= (y1 - y0) * 0.9) y1v = Math.ceil(need + 0.3); else headOver = true; }   // 너무 많이 줄여야 하면 제목을 흐리게
+      }
+    }
+    if (headEl) headEl.classList.toggle("over", headOver);
+    FULL = { x0, x1, y0, y1: y1v };
     if (viewKind !== S.x) { VIEWBOX = null; viewKind = S.x; }
     VIEWBOX = clampView(VIEWBOX);
     const V = VIEWBOX || FULL;
@@ -629,11 +662,13 @@
     const topKeys = new Set(list.slice().sort((a, b) => b.best.score - a.best.score).slice(0, 3).map((M) => M.key));   // 점수 상위 3개 모델도 이름 우선
     const series = [];
     for (const M of list) {
-      const col = colorOf(M.company);
+      const coCol = colorOf(M.company);
       const sym = styleOf(M.company).sym;
       const pinned = pinSet.has(M.key);
       const hl = hoverCo != null && groupOf(M.company) === hoverCo;   // 회사 버튼에 마우스를 올려 강조 중
       const dim = (anyPin && !pinned) || (hoverCo != null && !hl);
+      const focus = pinned || hl;               // 지금 보고 있는 모델만 회사 색, 나머지는 흑백
+      const col = focus ? coCol : dotC;
       const shown = M.vs.filter((z) => xOf(z) != null);
       const topV = shown.reduce((a, b) => (b.score > a.score ? b : a), { score: -1 });
       const data = shown.map((v) => {
@@ -642,7 +677,7 @@
         const isTop = v === topV;
         const st = (FR.status.get(vkey(v)) || {}).st;
         const fr = st === "front", nr = st === "near";
-        const base = sym === "pin" ? 16 : sym === "triangle" ? 12 : 10;
+        const base = (sym === "pin" ? 16 : sym === "triangle" ? 12 : 10) + (mapMode && !narrow ? 1 : 0);
         return {
           value: [x, +v.score.toFixed(2)],
           v,
@@ -650,17 +685,17 @@
           symbolSize: base + (pinned ? 3 : 0) + (fr ? 3 : nr ? 2 : 0),
           itemStyle: Object.assign(
             hollow ? { color: surf, borderColor: col, borderWidth: 2 }
-              : fr ? { color: col, borderColor: ink, borderWidth: 2 }
+              : fr ? { color: focus ? coCol : txt, borderColor: ink, borderWidth: 2 }   // 경계선 위 점: 흰 점 + 연두 테두리
               : nr ? { color: col, borderColor: ink, borderWidth: 1.4, borderType: [2, 2] }
               : { color: col, borderColor: surf, borderWidth: 1.5 },
-            { opacity: dim ? 0.16 : 1 }),
+            { opacity: dim ? 0.14 : 1 }),
           // 이름표 후보 (실제 자리는 아래 placeLabels 가 겹치지 않게 정함)
           label: { show: false },
           __lab: pinned ? { text: isTop ? `${M.name} · ${v.eff}` : v.eff, strong: isTop, small: !isTop, force: true, prio: 1000 + (isTop ? 50 : 0) + v.score }
             : isTop && (labelled.has(M.key) || hl) && !dim ? { text: zoomedIn ? `${M.name} · ${v.eff}` : M.name, prio: (hl ? 800 : frModels.has(M.key) ? 500 : topKeys.has(M.key) ? 450 : 300) + v.score }
             : zoomedIn && !dim ? { text: `${M.name} · ${v.eff}`, alt: v.eff, small: true, prio: 100 + v.score } : null,   // 자리가 모자라면 등급만
           emphasis: {
-            itemStyle: { opacity: 1 },
+            itemStyle: Object.assign({ opacity: 1, color: hollow ? surf : coCol }, hollow ? { borderColor: coCol } : {}),   // 마우스를 올리면 그 모델에 회사 색
             label: {
               show: true, position: sidePos(x), distance: 7, fontFamily: font, opacity: 1, textBorderColor: halo, textBorderWidth: 3,
               formatter: isTop ? `${M.name} · ${v.eff}` : v.eff,
@@ -672,18 +707,17 @@
       if (!data.length) continue;
       series.push({
         name: M.name, id: M.key, type: "line", data, showSymbol: true, triggerLineEvent: true,
-        lineStyle: { width: pinned || hl ? 2 : 1.2, color: col, opacity: pinned || hl ? 0.65 : dim ? 0.05 : 0.3, cap: "round", join: "round" },
+        lineStyle: { width: focus ? 2 : 1.1, color: focus ? coCol : dotLine, opacity: focus ? 0.7 : dim ? 0.3 : 1, cap: "round", join: "round" },
         itemStyle: { color: col },
-        emphasis: { focus: "series", lineStyle: { width: 2, opacity: 0.75 } },
+        emphasis: { focus: "series", lineStyle: { width: 2, opacity: 0.85, color: coCol } },
         blur: { lineStyle: { opacity: 0.06 }, itemStyle: { opacity: 0.14 }, label: { opacity: 0.2 } },
         labelLayout: { hideOverlap: false },   // 겹침은 placeLabels 가 직접 처리
         z: pinned ? 6 : hl ? 5 : dim ? 1 : 3,
-        animationDuration: 550, animationEasing: "cubicOut",
+        animationDuration: firstDraw ? 1500 : 550, animationEasing: "cubicOut",   // 처음 열 때는 지도가 왼쪽부터 천천히 펼쳐짐
       });
     }
     // 지도 영역 이름: 경계선 위쪽 = 아직 아무도 없는 곳, 아래 오른쪽 = 돈 낭비 구역
     //  (처음 보는 사람도 그래프를 바로 읽을 수 있게. 확대 중이거나 경계선을 끄면 숨김)
-    const G = narrow ? { left: 34, right: 12, top: chartBox.classList.contains("full") && S.pinned.length ? 70 : 22, bottom: 30 } : { left: 46, right: 18, top: 24, bottom: 34 };
     const regions = [], regionRects = [];
     const W = chartEl.clientWidth, H = chartEl.clientHeight, gw = W - G.left - G.right, gh = H - G.top - G.bottom;
     const gx = (x) => G.left + ((tx(x) - tx(V.x0)) / (tx(V.x1) - tx(V.x0))) * gw;
@@ -713,7 +747,7 @@
           },
         });
       };
-      mk("↖ 아직 아무도 없는 곳", "경계선보다 싸면서 더 똑똑한 모델은 아직 없어요", "tl");
+      if (!mapMode || full) mk("↖ 아직 아무도 없는 곳", "경계선보다 싸면서 더 똑똑한 모델은 아직 없어요", "tl");
       mk("돈 낭비 구역 ↘", "같은 돈이면 경계선 위에 더 똑똑한 모델이 있어요", "br");
     }
     // 경계선에 이름을 직접 붙임 (범례를 찾지 않아도 바로 알 수 있게): 가장 싼 경계 점의 오른쪽 가로선 아래
@@ -733,7 +767,12 @@
         }
       }
     }
-    placeLabels(series, V, narrow, { txt, txt2, halo, font, block: regionRects, soft: lineRects });
+    if (mapMode && !full && !quiet && headEl && !document.body.classList.contains("map-busy")) {
+      const hr = headEl.getBoundingClientRect(), cr = chartEl.getBoundingClientRect();
+      regionRects.push({ x: hr.left - cr.left - 6, y: hr.top - cr.top - 6, w: hr.width + 12, h: hr.height + 12 });
+    }
+    LAST = { lines: lineRects, blocks: regionRects.slice(), G };
+    placeLabels(series, V, narrow, { txt, txt2, halo, font, block: regionRects, soft: lineRects, G });
     // 가성비 경계선: 연두색 실선 + 빛, 아래에 '오차 범위' 띠 — 이 화면의 주인공
     if (front.length >= 2) {
       const pts = front.map((p) => [p.x, +p.v.score.toFixed(2)]);
@@ -745,7 +784,7 @@
       });
       series.push({
         id: "__fband", type: "line", step: "end", silent: true, z: 1, stack: "fband", symbol: "none",
-        data: pts.map(([x]) => [x, k]), lineStyle: { opacity: 0 }, areaStyle: { color: ink, opacity: 0.08 },
+        data: pts.map(([x]) => [x, k]), lineStyle: { opacity: 0 }, areaStyle: { color: ink, opacity: 0.06 },
         tooltip: { show: false }, emphasis: { disabled: true }, animation: false,
       });
       series.push({
@@ -753,15 +792,35 @@
         data: pts, showSymbol: false,
         lineStyle: { width: 2, color: ink, opacity: 0.95, shadowBlur: 14, shadowColor: ink + "80", cap: "round", join: "round" },
         tooltip: { show: false }, emphasis: { disabled: true },
-        animationDuration: 1100, animationEasing: "cubicInOut",
+        animationDuration: firstDraw ? 1900 : 1100, animationDelay: firstDraw ? 250 : 0, animationEasing: "cubicInOut",
       });
+      if (!REDUCED) {   // 경계선을 따라 흐르는 빛 (계단 모양 그대로)
+        const cs = [[front[0].x, front[0].v.score]];
+        for (let i = 1; i < front.length; i++) { cs.push([front[i].x, front[i - 1].v.score]); cs.push([front[i].x, front[i].v.score]); }
+        cs.push([V.x1, front[front.length - 1].v.score]);
+        series.push({
+          id: "__fpulse", type: "lines", coordinateSystem: "cartesian2d", polyline: true, silent: true, z: 4, clip: true,
+          data: [{ coords: cs }], lineStyle: { opacity: 0, width: 0 },
+          effect: { show: true, period: 7, trailLength: 0.2, symbol: "circle", symbolSize: narrow ? 3 : 4, color: txt, loop: true },
+          tooltip: { show: false }, animation: false,
+        });
+      }
     }
+    SIDX = new Map();
+    series.forEach((s2, i) => { if (s2.type === "line" && !String(s2.id).startsWith("__")) SIDX.set(s2.id, { i, effs: s2.data.map((d) => d.v.effort) }); });
 
     const axLabel = { fontFamily: mono, fontSize: 11 };
     const xAxis = S.x === "date"
       ? Object.assign({ type: "time", splitLine: { show: true, lineStyle: { color: grid } }, axisLine: { lineStyle: { color: axis } }, axisTick: { show: false } }, dateAxisView(V, muted))
       : Object.assign({ type: "log", logBase: 10, splitLine: { show: true, lineStyle: { color: grid } }, axisLine: { lineStyle: { color: axis } }, minorSplitLine: { show: false } }, logAxisView(V, muted));
     Object.assign(xAxis.axisLabel, axLabel);
+    let yPointer = { show: false };
+    if (CAN_HOVER && !narrow) {   // 마우스를 따라오는 십자선과 눈금 읽기 (계기판처럼)
+      const ap = (fmt) => ({ show: true, type: "line", snap: false, triggerTooltip: false, lineStyle: { color: axis, width: 1, type: [3, 4] },
+        label: { show: true, backgroundColor: txt, color: css("--bg"), fontFamily: mono, fontSize: 11, padding: [3, 6], borderRadius: 3, formatter: fmt } });
+      xAxis.axisPointer = ap((p) => fmtCost(p.value));
+      yPointer = ap((p) => (+p.value).toFixed(1));
+    }
 
     // 그래프 아래 설명
     const xName = {
@@ -772,6 +831,11 @@
     }[S.x];
     const noX = list.reduce((n, M) => n + M.vs.filter((v) => xOf(v) == null).length, 0);
     $("#axisX").textContent = xName + (noX ? ` · 비용 정보가 없어 빠진 점 ${noX}개 (표에는 있음)` : "");
+    if (mapMode) {   // 지도 배치: 가로축 설명을 눈금 바로 아래에 (아래 설명 줄 대신)
+      const short = { cost: "문제 1개 푸는 비용 →", costok: "맞힌 문제 1개당 비용 →" }[S.x] || xName;
+      Object.assign(xAxis, { name: `{a|${short}}` + (noX ? `{b|  비용 정보가 없어 빠진 점 ${noX}개는 순위표에만}` : ""), nameLocation: "middle", nameGap: 32,
+        nameTextStyle: { rich: { a: { color: txt2, fontFamily: font, fontSize: 12, fontWeight: 600 }, b: { color: muted, fontFamily: font, fontSize: 11.5 } } } });
+    }
 
     chart.setOption({
       backgroundColor: "transparent",
@@ -783,7 +847,7 @@
       yAxis: {
         type: "value", min: V.y0, max: V.y1,
         axisLabel: Object.assign({ color: muted, showMinLabel: false, showMaxLabel: false, formatter: (v) => (Number.isInteger(v) ? v : v.toFixed(1)) }, axLabel),
-        splitLine: { lineStyle: { color: grid } }, axisLine: { show: false }, minInterval: 0.5,
+        splitLine: { lineStyle: { color: grid } }, axisLine: { show: false }, minInterval: 0.5, axisPointer: yPointer,
       },
       tooltip: {
         trigger: "item", confine: true, enterable: false, backgroundColor: "transparent", borderWidth: 0, padding: 0,
@@ -934,6 +998,12 @@
     zoomOn = on;
     chartBox.classList.toggle("zoom-on", on);
     if (on) hideToast();
+    updateMapBusy();
+  }
+  // 지도 배치에서 확대 모드이거나 확대해 둔 상태면 제목·설명표를 치워 지도를 넓게
+  function updateMapBusy() {
+    const busy = MAPMODE() && (zoomOn || !!VIEWBOX);
+    if (document.body.classList.contains("map-busy") !== busy) document.body.classList.toggle("map-busy", busy);
   }
   function showToast(msg) {
     const t = $("#zoomToast");
@@ -1001,17 +1071,18 @@
   });
   // PC: 그래프 칸 전체가 (위에 붙은 막대들 아래) 한 화면에 딱 들어가도록 그래프 높이를 맞춤
   function fitChartHeight() {
-    if (window.innerWidth <= 700 || chartBox.classList.contains("full")) { chartEl.style.height = ""; return; }
-    const extra = chartBox.offsetHeight - chartEl.offsetHeight;
-    const top0 = $(".topbar").offsetHeight + dock.offsetHeight;
-    const h = Math.max(440, Math.min(900, window.innerHeight - top0 - extra - 16));
-    if (Math.abs(chartEl.offsetHeight - h) > 2) chartEl.style.height = h + "px";
+    chartEl.style.height = "";   // 높이는 style.css 가 정함 (지도 배치는 화면 가득)
   }
   window.addEventListener("resize", () => { clearTimeout(fitChartHeight.t); fitChartHeight.t = setTimeout(fitChartHeight, 120); });
   function centerChart() {
+    if (MAPMODE()) {   // 지도 배치: 지도 맨 위로
+      const top = $("#map").getBoundingClientRect().top + scrollY;
+      if (Math.abs(scrollY - top) > 4) window.scrollTo({ top, behavior: REDUCED ? "auto" : "smooth" });
+      return;
+    }
     const r = chartBox.getBoundingClientRect();
-    const top0 = $(".topbar").offsetHeight + dock.offsetHeight;   // 위에 붙어 있는 막대들 아래부터가 보이는 공간
-    const avail = window.innerHeight - top0;
+    const top0 = $(".topbar").offsetHeight;   // 맨 위 막대 아래 ~ 아래 명령 막대 위가 보이는 공간
+    const avail = window.innerHeight - top0 - 80;
     const delta = r.height <= avail ? r.top - (top0 + (avail - r.height) / 2) : r.top - top0 - 8;
     if (Math.abs(delta) > 4) window.scrollBy({ top: delta, behavior: REDUCED ? "auto" : "smooth" });
   }
@@ -1116,6 +1187,7 @@
     chartEl.classList.toggle("zoomed", !!VIEWBOX);
     $("#resetZoom").disabled = !VIEWBOX;
     $("#zoomOut").disabled = !VIEWBOX;
+    updateMapBusy();
   }
 
   // ───────── 마우스 올리기·누르기
@@ -1172,8 +1244,7 @@
   function pinAndShow(key, effort) {
     if (!S.pinned.includes(key)) S.pinned = [...S.pinned, key].slice(-8);
     S.selected = key; S.selEffort = effort || null;
-    save(); render();
-    setTimeout(() => $("#detail").scrollIntoView({ behavior: REDUCED ? "auto" : "smooth", block: "start" }), 480);
+    save(); render();   // 상세는 옆(휴대폰은 아래)에서 밀려 나옴 — 스크롤하지 않음
   }
   function renderPinBar() {
     const el = $("#pinBar"), hint = $("#pinHint");
@@ -1208,7 +1279,7 @@
       circle: `<circle cx="6" cy="6" r="5"/>`, rect: `<rect x="1" y="1" width="10" height="10" rx="1.5"/>`, roundRect: `<rect x="1" y="1" width="10" height="10" rx="3.5"/>`,
       diamond: `<path d="M6 0 L12 6 L6 12 L0 6Z"/>`, triangle: `<path d="M6 1 L11.5 11 L0.5 11Z"/>`, pin: `<path d="M6 12 C3 8 1 6.5 1 4.5 A5 5 0 0 1 11 4.5 C11 6.5 9 8 6 12Z"/>`,
     }[sym];
-    return `<svg viewBox="0 0 12 12" style="fill:${col}">${s}</svg>`;
+    return `<svg viewBox="0 0 12 12"${col ? ` style="fill:${col}"` : ""}>${s}</svg>`;
   }
   function renderLegend(all, found) {
     // 숫자 = 그 기간의 모델 수 (검색 중이면 검색에 맞는 모델 수 → 꺼 둔 회사에 결과가 있는지 바로 보임)
@@ -1225,7 +1296,8 @@
       chip.title = (g === "기타" ? "상위 " + TOP_N + "곳 밖의 모든 회사" + NL : "") + COMPANY_RULE + NL
         + (found ? "숫자 = 검색에 맞는 모델 수" + NL : "") + (S.hidden.includes(g) ? "눌러서 보이기" : "눌러서 숨기기");
       if (found && S.hidden.includes(g) && cnt[g]) chip.classList.add("has-hit");   // 꺼 둔 회사에 검색 결과가 있으면 숫자를 눈에 띄게
-      chip.innerHTML = symbolSvg(st.sym, css(st.c));
+      chip.innerHTML = symbolSvg(st.sym);
+      chip.style.setProperty("--co", css(st.c));   // 마우스를 올렸을 때만 회사 색
       const t = document.createElement("span"); t.textContent = g;
       const n = document.createElement("span"); n.className = "cnt"; n.textContent = cnt[g] || 0;
       chip.append(t, n);
@@ -1351,8 +1423,62 @@
         `<div class="vt">${c.html}</div>`;
       // 줄을 누르면 그 모델을 그래프에 고정하고 상세를 보여 줌
       card.onclick = (e) => { const r = e.target.closest(".vt-row"); if (r) pinAndShow(r.dataset.key, r.dataset.eff); };
+      if (CAN_HOVER) {   // 줄에 마우스 → 지도에서 그 점 강조
+        card.onmouseover = (e) => { const r = e.target.closest(".vt-row"); if (r && r !== card.__hov) { card.__hov = r; chart.dispatchAction({ type: "downplay" }); focusPoint(r.dataset.key, r.dataset.eff); } };
+        card.onmouseleave = () => { card.__hov = null; chart.dispatchAction({ type: "downplay" }); chart.dispatchAction({ type: "hideTip" }); };
+      }
     });
     while (el.children.length > cards.length) el.lastChild.remove();
+  }
+
+  // ───────── 지도 배치: 답 카드를 지도 위 빈 곳에 띄우고, 1위 줄과 그 점을 선으로 이음
+  //  · 점 · 경계선 · 제목 · 영역 이름 · 도구 · 명령 막대를 가리지 않는 자리를 찾고, 가리키는 점에 가까울수록 좋게
+  //  · 가성비 추천(가장 중요한 답)을 먼저 자리 잡음
+  function placeCallouts() {
+    const lay = $("#cards"), svg = $("#leaders");
+    if (!lay || !svg) return;
+    svg.innerHTML = "";
+    lay.classList.remove("tight", "tighter");
+    lay.style.top = lay.style.bottom = "";
+    if (!MAPMODE() || !VIEW || chartBox.classList.contains("full")) return;
+    const G = LAST.G;
+    if (!G) return;
+    lay.style.top = G.top + "px";
+    lay.style.bottom = (G.bottom - 24) + "px";
+    // 칸보다 길면 2·3위의 비교 문구 → 2·3위 줄 순서로 줄여서 넣음
+    const fits = () => lay.scrollHeight <= lay.clientHeight + 1;
+    if (!fits()) lay.classList.add("tight");
+    if (!fits()) lay.classList.add("tighter");
+    const lr = lay.getBoundingClientRect(), mr = $("#map").getBoundingClientRect(), cr = chartEl.getBoundingClientRect();
+    let h = "";
+    for (const card of lay.querySelectorAll(".pick:not(.pick-empty)")) {
+      const row = card.querySelector(".vt-row.first");
+      const tgt = row && VIEW.points.find((p) => p.M.key === row.dataset.key && p.v.effort === row.dataset.eff && p.x != null);
+      if (!tgt) continue;
+      const q = chart.convertToPixel({ gridIndex: 0 }, [tgt.x, tgt.v.score]);
+      if (!q) continue;
+      const T = [q[0] + cr.left - mr.left, q[1] + cr.top - mr.top];
+      // 카드가 떠오르는 중이어도 어긋나지 않게, 움직임과 상관없는 배치 위치로 계산
+      const vt = row.offsetParent;
+      const ax = lay.offsetLeft + card.offsetLeft + (vt ? vt.offsetLeft : 0) + row.offsetLeft - 2;
+      const ay = lay.offsetTop + card.offsetTop + (vt ? vt.offsetTop : 0) + row.offsetTop + row.offsetHeight / 2;
+      const d = Math.hypot(T[0] - ax, T[1] - ay);
+      if (d < 20) continue;
+      const ex = T[0] + ((ax - T[0]) / d) * 12, ey = T[1] + ((ay - T[1]) / d) * 12;
+      // 꺾은선: 점에서 가로로 나온 뒤 카드 쪽으로 (도면의 지시선처럼)
+      const kx = Math.max(T[0] + 24, ax - 36);
+      h += `<g class="${card.dataset.kind === "value" ? "hot" : ""}"><polyline fill="none" points="${ex.toFixed(1)},${ey.toFixed(1)} ${kx.toFixed(1)},${ay.toFixed(1)} ${ax.toFixed(1)},${ay.toFixed(1)}"/>` +
+        `<circle class="ring" cx="${T[0].toFixed(1)}" cy="${T[1].toFixed(1)}" r="12"/><circle class="tip-dot" cx="${ax.toFixed(1)}" cy="${ay.toFixed(1)}" r="2.5"/></g>`;
+    }
+    svg.innerHTML = h;
+  }
+  // 설명표 줄에 마우스를 올리면 그 점을 지도에서 강조하고 말풍선을 띄움
+  function focusPoint(key, eff) {
+    const s2 = SIDX.get(key);
+    if (!s2) return;
+    const di = s2.effs.indexOf(eff);
+    chart.dispatchAction({ type: "highlight", seriesIndex: s2.i });
+    if (di >= 0) chart.dispatchAction({ type: "showTip", seriesIndex: s2.i, dataIndex: di });
   }
 
   // ───────── 순위표
@@ -1390,7 +1516,7 @@
       const pct = sMax > sMin ? ((v.score - sMin) / (sMax - sMin)) * 100 : 100;
       tr.innerHTML =
         `<td class="c-rank">${v.rank}</td>` +
-        `<td class="c-name"><span class="mname"><span class="sw" style="background:${colorOf(v.m.company)}"></span>${esc(v.m.name)}</span> ${daysSince(v.m.date) <= 30 ? '<span class="badge new">NEW</span>' : ""}<span class="m-eff"><b>${esc(v.eff)}</b>${v.isDefault ? " · 기본값" : ""}</span></td>` +
+        `<td class="c-name"><span class="mname"><span class="sym">${symbolSvg(styleOf(v.m.company).sym)}</span>${esc(v.m.name)}</span> ${daysSince(v.m.date) <= 30 ? '<span class="badge new">NEW</span>' : ""}<span class="m-eff"><b>${esc(v.eff)}</b>${v.isDefault ? " · 기본값" : ""}</span></td>` +
         `<td class="effc c-eff"><b>${esc(v.eff)}</b>${v.effKo && v.effort !== "none" ? `<span class="ko">${esc(v.effKo)}</span>` : ""}${v.isDefault ? ' <span class="badge def">기본값</span>' : ""}${!canSelect(v.m, v.effort) ? ' <span class="badge est">선택 불가</span>' : ""}</td>` +
         `<td class="num c-score"><span class="scorec"><span class="bar"><i style="width:${Math.max(4, pct).toFixed(0)}%"></i></span><b>${v.score.toFixed(1)}</b></span><span class="sub2">±${v.se.toFixed(1)}<span class="conf-x"> · 신뢰도 <span class="badge ${c.k}">${c.t}</span></span></span></td>` +
         `<td class="num c-cost">${fmtCost(v.cost)}${v.costKind && v.costKind !== "측정" ? `<span class="sub2">${esc(v.costKind === "가격 추정" ? "가격표로 추정" : "등급 환산")}</span>` : ""}</td>` +
@@ -1599,6 +1725,7 @@
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     closeMenus();
+    if ($("#detail").classList.contains("open")) { S.selected = null; renderDetail(); renderPinBar(); }
     if (chartBox.classList.contains("full")) setFull(false);
     else setZoomOn(false);
   });
@@ -1765,9 +1892,30 @@
   });
 
   $("#resetSettings").onclick = () => resetSettings();
+  document.body.classList.add("intro");   // 처음 열 때만: 설명표·선이 지도 뒤에 차례로 나타남
+  setTimeout(() => document.body.classList.remove("intro"), 2600);
   pickCompanies(computeAll());
   render();
   try { renderTicker(VIEW.all); } catch (e) { /* 띠가 안 나와도 나머지는 그대로 */ }
+
+  // ───────── 지도 배치: 맨 위 막대는 지도 위에서 투명, 아래로 내려가면 바탕 / 제목은 스크롤하면 서서히 사라짐
+  const topbarEl = $("#topbar"), mapEl = $("#map");
+  const onMapScroll = () => {
+    const mm = MAPMODE();
+    topbarEl.classList.toggle("solid", !mm || scrollY > mapEl.offsetHeight - topbarEl.offsetHeight - 20);
+    mapEl.style.setProperty("--fade", mm ? Math.max(0, 1 - scrollY / 380).toFixed(3) : "1");
+  };
+  window.addEventListener("scroll", onMapScroll, { passive: true });
+  window.addEventListener("resize", onMapScroll);
+  onMapScroll();
+  // '/' 를 누르면 검색칸으로
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    e.preventDefault();
+    $("#search").focus();
+  });
 
   // ───────── 휴대폰: 아래쪽 막대의 '조절' → 판이 위로 올라옴
   const dockToggle = $("#dockToggle"), scrim = $("#dockScrim");
@@ -1782,7 +1930,7 @@
   dockToggle.onclick = (e) => { e.stopPropagation(); setSheet(!dock.classList.contains("open")); };
   scrim.onclick = () => setSheet(false);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && dock.classList.contains("open")) setSheet(false); });
-  matchMedia("(max-width: 700px)").addEventListener("change", (m) => { if (!m.matches) setSheet(false); });
+  matchMedia("(max-width: 1023px)").addEventListener("change", (m) => { if (!m.matches) setSheet(false); });
 
   // ───────── PC: 순위표 제목 줄이 조절 막대 바로 아래에 붙도록 막대 높이를 알려 줌
   const setDockH = () => document.documentElement.style.setProperty("--dock-h", (innerWidth > 700 ? dock.offsetHeight : 0) + "px");
@@ -1837,7 +1985,7 @@
   }
   window.addEventListener("resize", () => { clearTimeout(renderMinimap.t); renderMinimap.t = setTimeout(() => VIEW && renderMinimap(VIEW.points), 200); });
   // 글꼴(계기판 숫자·한글)이 늦게 도착하면 그래프 글자를 한 번 더 그림 (그래프는 그림이라 글꼴이 자동으로 안 바뀜)
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (VIEW) { quietRender = true; renderChart(VIEW.list, VIEW.points); quietRender = false; } });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (VIEW) { quietRender = true; renderChart(VIEW.list, VIEW.points); quietRender = false; placeCallouts(); } });
   fitChartHeight();
   // 글꼴이 늦게 들어오면 알약 버튼 폭이 바뀌므로 한 번 더 맞춤
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { syncSegs(); fitChartHeight(); });
