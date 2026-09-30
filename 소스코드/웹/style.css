@@ -553,4 +553,20 @@ table#table { width: 100%; border-collapse: collapse; font-size: 14px; min-width
 @keyframes zbadge { 0% { opacity: 0; transform: translate(-50%, 18px) scale(.7); } 100% { opacity: 1; transform: translate(-50%, 0) scale(1); } }
 .zoom-badge b { font-weight: 800; }
 .zb-mo { display: none; }
-@media (max-width: 700px) { .zb-pc { display: none; } .zb-mo { display: inline; } }
+@media (max-width: 700px), (pointer: coarse) { .zb-pc { display: none; } .zb-mo { display: inline; } }
+/* 크게 보기에서는 안내 표시가 잠깐 보였다가 사라짐 (그래프를 가리지 않게) */
+.chart-box.full .zoom-badge { animation: zbadgeFade 3.4s ease both; }
+@keyframes zbadgeFade { 0% { opacity: 0; transform: translate(-50%, 6px); } 12%, 75% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; transform: translate(-50%, 0); } }
+/* 휴대폰 가로(낮은 화면)에서 크게 보기: 위아래 칸을 줄여 그래프를 최대한 크게 */
+@media (max-height: 500px) {
+  .chart-box.full { padding: 6px 10px 2px; }
+  .chart-box.full .chart-head { flex-direction: row; align-items: center; gap: 8px; padding: 0 2px 4px; }
+  .chart-box.full .legend { flex: 1; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .chart-box.full .legend::-webkit-scrollbar { display: none; }
+  .chart-box.full .chip { flex: none; height: 26px; padding: 0 9px; font-size: 12px; }
+  .chart-box.full .tbtn { height: 28px; min-width: 28px; }
+  .chart-box.full .pinbar { min-height: 0; padding: 0 2px 2px; }
+  .chart-box.full .pinbar .hint { display: none; }
+  .chart-box.full .chart-foot { padding: 2px 4px 0; font-size: 11px; }
+  .chart-box.full .axis-x { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+}

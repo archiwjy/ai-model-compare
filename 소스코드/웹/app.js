@@ -488,6 +488,7 @@
   //  · 그래프를 한 번 클릭해야 '확대 모드'가 켜짐 (그전엔 휠 = 페이지 스크롤)
   //  · 확대 모드: 휠로 확대/축소, 끌어서 이동, 빈 곳 더블클릭 = 처음 화면
   //  · 끄는 방법은 두 가지뿐: Esc, 또는 그래프 칸 밖을 한 번 클릭 (마우스가 밖으로 나가기만 해서는 안 꺼짐)
+  //  · 켜져 있는 동안은 마우스가 어디에 있든 페이지가 스크롤되지 않음
   let FULL = null, VIEWBOX = null, viewKind = null;
   const isLog = () => S.x !== "date";
   const tx = (v) => (isLog() ? Math.log10(v) : v);
@@ -667,8 +668,21 @@
     if (Math.abs(delta) > 4) window.scrollBy({ top: delta, behavior: REDUCED ? "auto" : "smooth" });
   }
   document.addEventListener("pointerdown", (e) => { if (!chartBox.contains(e.target) && !chartBox.classList.contains("full")) setZoomOn(false); });
-  // 확대 모드일 때는 그래프 칸 어디서 휠을 굴려도 페이지가 스크롤되지 않게 막는다
-  chartBox.addEventListener("wheel", (e) => { if (zoomOn) e.preventDefault(); }, { passive: false });
+  // 확대 모드일 때는 마우스가 어디에 있든(그래프 밖이어도) 페이지가 절대 스크롤되지 않게 막는다
+  //  · 그래프 밖에서 휠을 굴리면 끝내는 방법을 알려줌
+  window.addEventListener("wheel", (e) => {
+    if (!zoomOn) return;
+    e.preventDefault();
+    if (!chartBox.contains(e.target)) showToast("확대 모드라 페이지가 고정돼 있어요 · Esc 또는 그래프 밖 클릭으로 끝내기");
+  }, { passive: false });
+  // 키보드로 페이지가 움직이는 것도 막음 (방향키·스페이스·PageUp/Down·Home/End)
+  const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+  document.addEventListener("keydown", (e) => {
+    if (!zoomOn || !SCROLL_KEYS.has(e.key)) return;
+    const t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    e.preventDefault();
+  });
   chartEl.addEventListener("wheel", (e) => {
     const rect = chartEl.getBoundingClientRect();
     const px = e.clientX - rect.left, py = e.clientY - rect.top;
@@ -1082,8 +1096,36 @@
   $("#resetZoom").onclick = () => resetView();
   $("#zoomIn").onclick = () => zoomCenter(0.7);
   $("#zoomOut").onclick = () => { if (VIEWBOX) zoomCenter(1 / 0.7); };
+  // 휴대폰: 크게 보기를 누르면 전체 화면 + 자동으로 가로 회전 (안드로이드 크롬·설치한 앱)
+  //  · 아이폰 사파리는 브라우저가 회전 고정을 막아서, 세로일 때 "가로로 돌려 주세요" 안내만 띄움
+  const IS_PHONE = matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) <= 600;
+  async function phoneLandscape(on) {
+    if (!IS_PHONE) return;
+    const ori = screen.orientation;
+    try {
+      if (on) {
+        const root = document.documentElement;
+        // 브라우저가 대답이 없을 때 무한정 기다리지 않도록 1.5초 제한
+        const limit = (p) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("시간 초과")), 1500))]);
+        if (!document.fullscreenElement && root.requestFullscreen) await limit(root.requestFullscreen({ navigationUI: "hide" }));
+        if (!ori || !ori.lock) throw new Error("회전 고정 안 됨");
+        await limit(ori.lock("landscape"));
+      } else {
+        if (ori && ori.unlock) ori.unlock();
+        if (document.fullscreenElement) await document.exitFullscreen();
+      }
+    } catch (e) {
+      if (on && chartBox.classList.contains("full") && matchMedia("(orientation: portrait)").matches)
+        showToast("휴대폰을 가로로 돌리면 더 넓게 보여요");
+    }
+  }
+  // 안드로이드 뒤로 가기 등으로 전체 화면이 풀리면 크게 보기도 같이 닫음
+  document.addEventListener("fullscreenchange", () => {
+    if (!document.fullscreenElement && chartBox.classList.contains("full")) setFull(false);
+  });
   function setFull(on, fromPop) {
     chartBox.classList.toggle("full", on);
+    phoneLandscape(on);
     document.body.classList.toggle("no-scroll", on);
     fitChartHeight();   // 크게 보기에선 높이 지정을 풀고, 닫으면 다시 화면에 맞춤
     $("#fullText").textContent = on ? "닫기" : "크게 보기";
