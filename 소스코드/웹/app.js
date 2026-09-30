@@ -934,10 +934,8 @@
     const withCost = points.filter((p) => costFor(p.v) != null && (S.estimated || p.v.costKind !== "가격 추정")).map((p) => p.v);
     if (!all.length) { el.innerHTML = ""; return; }
 
-    // ── 최고 성능 1·2·3위: 모델마다 가장 좋은 등급 하나씩 (같은 모델의 등급만 줄줄이 나오지 않게)
-    const bestPer = new Map();
-    for (const v of all) { const b = bestPer.get(v.m); if (!b || v.score > b.score) bestPer.set(v.m, v); }
-    const topRows = [...bestPer.values()].sort((a, b) => b.score - a.score).slice(0, 3);
+    // ── 최고 성능 1·2·3위: 그래프의 점(모델 × 등급) 전체를 종합 성능 점수 높은 순으로 (그래프 높이 순서와 똑같이)
+    const topRows = all.slice().sort((a, b) => b.score - a.score).slice(0, 3);
     const top = topRows[0];
     const band = (v, w = top) => Math.sqrt(w.se ** 2 + v.se ** 2);   // 두 점수를 비교할 때의 오차 범위
 
@@ -991,7 +989,7 @@
         !second ? { ok: true, t: "비교할 2위 없음" } : gapOk ? { ok: true, t: "2위와 차이가 오차보다 큼" } : { ok: false, t: `2위와 차이 ${(top.score - second.score).toFixed(1)}점 < 오차 ±${band(second).toFixed(1)}` },
       ];
       const level = !gapOk ? { k: "mid", t: "사실상 공동 1위" } : checks[0].ok ? { k: "hi", t: "1위 확실" } : { k: "mid", t: "1위 대체로 확실" };
-      cards.push({ kind: "top", label: "최고 성능", icon: ICON_TOP, sub: "성능 높은 순", tip: "모델마다 가장 좋은 추론 등급 하나씩, 종합 성능 점수가 높은 순서", v: top,
+      cards.push({ kind: "top", label: "최고 성능", icon: ICON_TOP, sub: "성능 높은 순", tip: "그래프의 모든 점(모델 × 추론 등급) 중 종합 성능 점수가 높은 순서 — 그래프에서 위에 있는 순서와 같아요", v: top,
         html: rowsHtml(topRows) + confHtml(level, checks, "1위가 2위보다 확실히 앞서는지. 두 점수 차이가 오차 범위보다 크면 확실") });
     }
     // 가성비 추천: 1위 추천이 얼마나 확실한지 (두 기관 측정? 비용 실측? 다음 후보와 가격 차이가 충분한가?)
