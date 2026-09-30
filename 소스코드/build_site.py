@@ -14,6 +14,7 @@ sys.dont_write_bytecode = True
 import hashlib
 import os
 import shutil
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(HERE, "웹")
@@ -44,6 +45,15 @@ def main(out):
     if not os.path.exists(os.path.join(dest, "data.js")):
         print("data.js 가 없습니다 — collect.py 가 먼저 실행돼야 합니다")
         return 1
+    # 브라우저가 예전 파일을 기억해 두고 보여주지 않도록, 파일 이름 뒤에 이번 버전 번호를 붙인다
+    stamp = time.strftime("%Y%m%d%H%M")
+    ip = os.path.join(dest, "index.html")
+    with open(ip, encoding="utf-8") as f:
+        html = f.read()
+    for name in ("style.css", "app.js", "effort_guide.js", "data.js", "lib/echarts.min.js", "manifest.webmanifest"):
+        html = html.replace(f'"{name}"', f'"{name}?v={stamp}"')
+    with open(ip, "w", encoding="utf-8") as f:
+        f.write(html)
     print("사이트 준비 완료:", site_folder(key)[:6] + "…")
     return 0
 

@@ -1108,6 +1108,29 @@
     }
   }
   refreshBtn.onclick = () => refreshNow(true);
+  // ───────── 앱으로 설치 (안드로이드 크롬 등)
+  if (HOSTED && "serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  let installEvt = null;
+  const installBtn = $("#installBtn");
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();          // 크롬 기본 안내 대신 우리 버튼으로
+    installEvt = e;
+    installBtn.hidden = false;
+  });
+  installBtn.onclick = async () => {
+    if (!installEvt) return;
+    installEvt.prompt();
+    await installEvt.userChoice.catch(() => null);
+    installEvt = null;
+    installBtn.hidden = true;
+  };
+  window.addEventListener("appinstalled", () => { installBtn.hidden = true; });
+  // 카카오톡 등 앱 안의 브라우저에서는 설치가 안 되므로 크롬으로 열도록 안내
+  if (HOSTED && /KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line\//i.test(navigator.userAgent) && /Android/i.test(navigator.userAgent)) {
+    const chromeUrl = "intent://" + location.href.replace(/^https?:\/\//, "") + "#Intent;scheme=https;package=com.android.chrome;end";
+    notice("앱으로 설치하려면 <b>크롬</b>에서 열어야 해요.", "", { label: "크롬으로 열기", fn: () => { location.href = chromeUrl; } });
+  }
+
   (HOSTED ? Promise.resolve(false) : checkHelper()).then((ok) => {
     if (!ok) return;
     // 창이 열려 있다고 도우미에게 알림 (창을 닫으면 도우미가 몇 분 뒤 스스로 꺼짐)

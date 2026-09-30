@@ -6,6 +6,10 @@
 <meta name="robots" content="noindex, nofollow, noarchive">
 <meta name="theme-color" content="#111110">
 <meta name="apple-mobile-web-app-title" content="AI 성능비교">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/favicon-64.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
 <title>AI 모델 성능비교판</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="style.css">
@@ -20,6 +24,7 @@
     </div>
     <div class="top-right">
       <div id="updated" class="updated"></div>
+      <button id="installBtn" class="primary" type="button" hidden>앱으로 설치</button>
       <button id="refreshBtn" class="primary" type="button">최신 데이터 받기</button>
       <button id="themeBtn" class="ghost" type="button" title="밝게/어둡게">화면 밝기</button>
     </div>

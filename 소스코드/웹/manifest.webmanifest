@@ -1,0 +1,17 @@
+{
+  "name": "AI 모델 성능비교판",
+  "short_name": "AI 성능비교",
+  "description": "여러 평가기관 점수를 합친 AI 모델 종합 성능과 비용 비교",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#111110",
+  "theme_color": "#111110",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
