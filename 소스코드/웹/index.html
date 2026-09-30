@@ -79,13 +79,13 @@
       <div class="ctl">
         <span class="ctl-label">회사별</span>
         <div class="menu" id="perCoMenu">
-          <button class="menu-btn" type="button" aria-haspopup="listbox"><span id="perCoText">3개</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+          <button class="menu-btn" type="button" aria-haspopup="listbox" aria-label="회사마다 보여 줄 모델 개수" title="회사마다 점수 높은 순으로 몇 개씩 보여 줄지"><span id="perCoText">3개</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
           <div class="menu-pop" role="listbox"></div>
         </div>
       </div>
       <label class="search">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="search" type="search" placeholder="모델 찾기 · 쉼표로 여러 개 (예: 제미나이, gpt, claude opus)" autocomplete="off">
+        <input id="search" type="search" placeholder="모델 찾기 · 쉼표로 여러 개" title="쉼표로 여러 개를 한 번에 찾을 수 있어요. 예: 제미나이, gpt, claude opus (한글 이름도 됨)" aria-label="모델 찾기" autocomplete="off">
       </label>
       <div class="menu" id="viewMenu">
         <button class="menu-btn" type="button" aria-haspopup="true" title="보기 설정">
@@ -97,7 +97,7 @@
           <label class="tog"><input type="checkbox" id="optLabels"><i></i><span>모델 이름 표시</span></label>
           <label class="tog"><input type="checkbox" id="optSelectable"><i></i><span>실제로 고를 수 있는 등급만<small>평가기관이 따로 쟀지만 실제 AI 에선 못 고르는 등급은 숨김 (예: 생각을 끌 수 없는 GPT-6 Astra 의 none)</small></span></label>
           <label class="tog"><input type="checkbox" id="optEstimated"><i></i><span>추정 비용도 그리기<small>측정 기록이 없어 가격표로 추정한 점 (속이 빈 점)</small></span></label>
-          <button class="menu-reset" id="resetSettings" type="button" title="맞힌 문제당 · 전체 기간 · 매우 어려움 · 회사마다 3개 · 경계선·이름 켬 · 추정 비용 끔 · 상위 5개 회사만">기본값으로 되돌리기</button>
+          <button class="menu-reset" id="resetSettings" type="button" title="맞힌 문제당 · 전체 기간 · 회사마다 3개 · 경계선·이름 켬 · 고를 수 있는 등급만 · 추정 비용 끔 · 상위 5개 회사만 · 어두운 화면">기본값으로 되돌리기</button>
         </div>
       </div>
     </div>
@@ -123,13 +123,14 @@
       <div class="axis-y" id="axisY">종합 성능 점수 ↑</div>
       <div id="chart" class="chart" role="img" aria-label="모델별 비용 대비 종합 성능 그래프"></div>
       <div class="zoom-toast" id="zoomToast" aria-live="polite"></div>
+      <div class="chart-empty" id="chartEmpty" hidden></div>
       <div class="zoom-badge" id="zoomBadge"><b>확대 모드</b><span class="zb-pc"> · 휠로 확대/축소 · 끝내기: <kbd>Esc</kbd> 또는 그래프 밖 클릭</span><span class="zb-mo"> · 두 손가락으로 확대/축소</span></div>
     </div>
     <div class="chart-foot">
       <span class="axis-x" id="axisX"></span>
       <span class="keys">
         <span class="key"><i class="k-line"></i>같은 모델의 추론 등급</span>
-        <span class="key" title="나보다 싸면서 더 똑똑한 모델이 없는 점들을 이은 선. 실측 비용만 사용"><i class="k-band"></i>가성비 경계선 · 옅은 띠 = 오차 범위</span>
+        <span class="key" title="나보다 싸면서 더 똑똑한 모델이 없는 점들을 이은 선. 지금 그래프에 보이는 회사·기간 기준이고, 가격표로 짐작한 비용은 빼고 계산"><i class="k-band"></i>가성비 경계선 · 옅은 띠 = 오차 범위</span>
         <span class="key" title="경계선보다 조금 낮지만 점수 오차 범위 안이라 사실상 같은 수준"><i class="k-near"></i>점선 테두리 = 사실상 동급</span>
         <span class="key"><i class="k-hollow"></i>추정 비용</span>
         <span class="key" title="AI가 답하기 전에 속으로 생각(추론)하는 과정을 끄고 바로 답하는 설정. 빠르고 싸지만 덜 똑똑해요"><b>none · 생각 끔</b> = 생각(추론)을 끄고 바로 답하는 공식 설정</span>
@@ -138,7 +139,7 @@
   </section>
 
   <!-- ───────── 모델 상세 (점을 누르면 열림) ───────── -->
-  <section class="panel detail" id="detail" aria-live="polite"></section>
+  <section class="panel detail" id="detail" aria-label="모델 상세"></section>
 
   <!-- ───────── 순위표 ───────── -->
   <section class="panel table-box reveal">
@@ -157,13 +158,13 @@
         <thead><tr>
           <th data-k="rank" class="c-rank">#</th>
           <th data-k="name">모델</th>
-          <th data-k="effort">추론 등급</th>
-          <th data-k="score" class="num" id="scoreTh">종합 점수</th>
-          <th data-k="cost" class="num">문제당 비용</th>
-          <th data-k="costok" class="num" title="문제당 비용 ÷ 정답률 (선택한 난이도 기준)">맞힌 문제당</th>
+          <th data-k="effort" class="c-eff">추론 등급</th>
+          <th data-k="score" class="num c-score" id="scoreTh">종합 점수</th>
+          <th data-k="cost" class="num c-cost">문제당 비용</th>
+          <th data-k="costok" class="num c-costok" title="문제당 비용 ÷ 정답률 (매우 어려운 문제 기준)">맞힌 문제당</th>
           <th data-k="value" class="num" title="비용이 10배 늘 때 점수가 얼마나 오르는지 기준의 상대 점수 — 높을수록 가성비 좋음">가성비</th>
-          <th data-k="price" class="num" title="100만 토큰당 입력/출력 가격">가격표</th>
-          <th data-k="date">출시</th>
+          <th data-k="price" class="num c-price" title="100만 토큰당 입력/출력 가격">가격표</th>
+          <th data-k="date" class="c-date">출시</th>
         </tr></thead>
         <tbody></tbody>
       </table>

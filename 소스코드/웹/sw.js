@@ -10,11 +10,11 @@ self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET" || new URL(req.url).origin !== self.location.origin) return;
   e.respondWith(
-    fetch(req, { cache: "no-store" })
+    fetch(req, { cache: "no-cache" })   // 서버에 바뀌었는지 물어보고, 안 바뀌었으면 브라우저 저장본을 씀
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy));
+          e.waitUntil(caches.open(CACHE).then((c) => c.put(req, copy)));
         }
         return res;
       })

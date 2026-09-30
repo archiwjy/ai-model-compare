@@ -8,6 +8,13 @@
     document.body.innerHTML = '<p style="padding:40px;font-size:16px">data.js 가 없습니다. 먼저 <b>성능비교판_열기</b> 를 실행하세요.</p>';
     return;
   }
+  (function uniqueNames() {
+    const count = (f) => { const c = {}; for (const m of D.models) c[f(m)] = (c[f(m)] || 0) + 1; return c; };
+    const c1 = count((m) => m.name);
+    for (const m of D.models) if (c1[m.name] > 1) m.name = `${m.name} (${(m.date || "").slice(0, 7) || m.key})`;
+    const c2 = count((m) => m.name);
+    for (const m of D.models) if (c2[m.name] > 1) m.name = `${m.name.replace(/ \([^)]*\)$/, "")} (${m.key})`;
+  })();
 
   // ───────── 회사별 색·모양
   //  · 색을 받는 회사는 사람이 정하지 않고, 데이터가 갱신될 때마다 자동으로 고름 (pickCompanies)
@@ -81,7 +88,8 @@
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  const colorOf = (co) => css(styleOf(co).c);
+  let colorCache = {};
+  const colorOf = (co) => colorCache[co] || (colorCache[co] = css(styleOf(co).c));
   const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
   function fmtCost(c) {
     if (c == null) return "—";
@@ -182,7 +190,7 @@
     for (const a of g.apps || []) {
       if (a.only && !a.only.includes(m.key)) continue;
       // 앱 메뉴 이름은 자동으로 받아올 공식 자료가 없어 참고용 (날짜는 상세 아래에 표시)
-      if (a.labels && a.labels[e]) out.push({ k: a.name + " (참고)", v: `${a.how} → ${a.labels[e]}` });
+      if (a.labels && a.labels[e]) out.push({ k: a.name, v: `${a.how} → ${a.labels[e]}` });
       else if (a.note) out.push({ k: a.name, v: a.note });
     }
     return out;
@@ -222,7 +230,8 @@
         }
         if (!den || !real.length) continue;
         vs.push({
-          m, effort: v.effort, eff: effLabel(m, v.effort), effKo: EFF_KO[v.effort] || v.effort,
+          m, effort: v.effort, eff: effLabel(m, v.effort),
+          effKo: /[가-힣]/.test(effLabel(m, v.effort)) ? "" : (EFF_KO[v.effort] || ""),   // 이름이 이미 한글이면 뜻을 또 붙이지 않음
           isDefault: defaultEffort(m) === v.effort,
           score: num / den, se: Math.sqrt(1 / den),
           disagree: real.length >= 2 ? Math.max(...real) - Math.min(...real) : null,
@@ -367,6 +376,13 @@
     const points = [];
     for (const M of list) for (const v of M.vs) points.push({ M, v, x: xOf(v) });
     VIEW = { all, list, points };
+    const empty = $("#chartEmpty");
+    if (empty) {
+      const none = !points.some((p) => p.x != null);
+      empty.hidden = !none;
+      if (none) empty.textContent = S.search.trim() ? "검색한 모델이 없어요 · 이름 일부만 쳐도 되고, 쉼표로 여러 개를 찾을 수 있어요"
+        : "보이는 모델이 없어요 · 그래프 위 회사 버튼을 눌러 다시 켜 보세요";
+    }
     renderLegend(all);
     renderChart(list, points);
     renderPinBar();
@@ -378,6 +394,63 @@
 
   // ───────── 그래프 그리기
   let quietRender = false;
+  // ───────── 이름표 자리 정하기
+  //  중요한 것부터(고정한 모델 > 회사 강조 > 경계선 위 모델 > 점수 높은 순) 오른쪽·왼쪽·위·아래 중
+  //  다른 이름표와 겹치지 않는 자리를 찾아 붙인다. 자리가 없으면 숨김 (고정한 모델은 항상 표시)
+  const measureCtx = document.createElement("canvas").getContext("2d");
+  function placeLabels(series, V, narrow, st) {
+    const W = chartEl.clientWidth, H = chartEl.clientHeight;
+    const full = chartBox.classList.contains("full");
+    const g = narrow ? { l: 34, r: 12, t: full && S.pinned.length ? 70 : 22, b: 30 } : { l: 46, r: 18, t: 24, b: 34 };
+    const gw = W - g.l - g.r, gh = H - g.t - g.b;
+    if (gw <= 0 || gh <= 0) return;
+    const ax = tx(V.x0), bx = tx(V.x1);
+    const px = (x) => g.l + ((tx(x) - ax) / (bx - ax)) * gw;
+    const py = (y) => g.t + ((V.y1 - y) / (V.y1 - V.y0)) * gh;
+    const cands = [], dots = [];
+    for (const s of series) for (const d of s.data || []) {
+      if (!d) continue;
+      // 흐리지 않은 점은 '가리지 않을 것'으로 기억
+      if (!(d.itemStyle && d.itemStyle.opacity < 0.5)) {
+        const X = px(d.value[0]), Y = py(d.value[1]), r = (d.symbolSize || 10) / 2;
+        dots.push({ x: X - r, y: Y - r, w: 2 * r, h: 2 * r });
+      }
+      if (!d.__lab) continue;
+      const X = px(d.value[0]), Y = py(d.value[1]);
+      if (X < g.l - 2 || X > g.l + gw + 2 || Y < g.t - 2 || Y > g.t + gh + 2) continue;   // 확대로 화면 밖
+      cands.push({ d, X, Y, r: (d.symbolSize || 10) / 2 });
+    }
+    cands.sort((a, b) => b.d.__lab.prio - a.d.__lab.prio);
+    const placed = [];
+    const overlap = (R, q) => R.x < q.x + q.w && R.x + R.w > q.x && R.y < q.y + q.h && R.y + R.h > q.y;
+    const hit = (R) => placed.some((q) => overlap(R, q));
+    for (const c of cands) {
+      const L = c.d.__lab;
+      const fs = L.small ? 11 : L.strong ? 12.5 : narrow ? 11 : 11.5, fw = L.strong ? 700 : 500;
+      measureCtx.font = `${fw} ${fs}px ${st.font}`;
+      const h = fs + 5, dist = narrow ? 4 : 6;
+      for (const text of L.alt ? [L.text, L.alt] : [L.text]) {   // 긴 이름표가 안 들어가면 짧은 것으로 다시 시도
+      const w = measureCtx.measureText(text).width + 6;
+      const nearR = (c.X - g.l) / gw > (narrow ? 0.62 : 0.8);
+      const order = nearR ? ["left", "top", "bottom", "right"] : narrow ? ["top", "right", "left", "bottom"] : ["right", "left", "top", "bottom"];
+      const rectOf = (p) => p === "right" ? { x: c.X + c.r + dist, y: c.Y - h / 2, w, h }
+        : p === "left" ? { x: c.X - c.r - dist - w, y: c.Y - h / 2, w, h }
+        : p === "top" ? { x: c.X - w / 2, y: c.Y - c.r - dist - h, w, h }
+        : { x: c.X - w / 2, y: c.Y + c.r + dist, w, h };
+      const inside = (R) => R.x >= 2 && R.x + R.w <= W - 2 && R.y >= 0 && R.y + R.h <= g.t + gh + 2;
+      // 1순위: 다른 이름표·점을 모두 피하는 자리 → 2순위: 이름표만 피하는 자리
+      let pos = order.find((p) => { const R = rectOf(p); return inside(R) && !hit(R) && !dots.some((q) => overlap(R, q)); })
+        || order.find((p) => { const R = rectOf(p); return inside(R) && !hit(R); });
+      if (!pos && L.force) pos = order.find((p) => inside(rectOf(p))) || order[0];
+      if (!pos) continue;
+      placed.push(rectOf(pos));
+      c.d.label = { show: true, position: pos, distance: dist, formatter: text, color: L.strong ? st.txt : st.txt2,
+        fontSize: fs, fontWeight: fw, fontFamily: st.font, textBorderColor: st.halo, textBorderWidth: 3 };
+      break;
+      }
+    }
+  }
+
   function renderChart(list, points) {
     renderedNarrow = isNarrow();
     const txt = css("--text"), txt2 = css("--text-2"), muted = css("--muted"), grid = css("--grid"), axis = css("--axis"), surf = css("--surface"), ink = css("--frontier");
@@ -419,8 +492,10 @@
     const front = FR.front;
 
     const labelled = new Set(list.slice(0, S.labels ? 40 : 0).map((M) => M.key));
+    const zoomedIn = !!VIEWBOX && S.labels;   // 확대 중: 공간이 넓어지니 보이는 점마다 이름·등급 표시
     const pinSet = new Set(S.pinned);
-    const anyPin = pinSet.size > 0;
+    const anyPin = list.some((M) => pinSet.has(M.key));   // 고정한 모델이 지금 그래프에 있을 때만 나머지를 흐리게
+    const frModels = new Set(FR.front.map((p) => p.M.key));   // 가성비 경계선 위에 점이 있는 모델 → 이름표 우선
     const series = [];
     for (const M of list) {
       const col = colorOf(M.company);
@@ -448,14 +523,11 @@
               : nr ? { color: col, borderColor: ink, borderWidth: 1.4, borderType: [2, 2] }
               : { color: col, borderColor: surf, borderWidth: 1.5 },
             { opacity: dim ? 0.16 : 1 }),
-          label: pinned ? {
-            show: true, position: sidePos(x), distance: 7,
-            formatter: isTop ? `${M.name} · ${v.eff}` : v.eff,
-            color: isTop ? txt : txt2, fontSize: isTop ? 12.5 : 10.5, fontWeight: isTop ? 700 : 500, fontFamily: font, textBorderColor: halo, textBorderWidth: 3,
-          } : isTop && (labelled.has(M.key) || hl) && !dim ? {
-            show: true, position: sidePos(x), distance: narrow ? 4 : 7,
-            formatter: M.name, color: txt2, fontSize: narrow ? 10.5 : 11.5, fontWeight: 500, fontFamily: font, textBorderColor: halo, textBorderWidth: 3,
-          } : { show: false },
+          // 이름표 후보 (실제 자리는 아래 placeLabels 가 겹치지 않게 정함)
+          label: { show: false },
+          __lab: pinned ? { text: isTop ? `${M.name} · ${v.eff}` : v.eff, strong: isTop, small: !isTop, force: true, prio: 1000 + (isTop ? 50 : 0) + v.score }
+            : isTop && (labelled.has(M.key) || hl) && !dim ? { text: zoomedIn ? `${M.name} · ${v.eff}` : M.name, prio: (hl ? 800 : frModels.has(M.key) ? 500 : 300) + v.score }
+            : zoomedIn && !dim ? { text: `${M.name} · ${v.eff}`, alt: v.eff, small: true, prio: 100 + v.score } : null,   // 자리가 모자라면 등급만
           emphasis: {
             itemStyle: { opacity: 1 },
             label: {
@@ -473,11 +545,12 @@
         itemStyle: { color: col },
         emphasis: { focus: "series", lineStyle: { width: 2, opacity: 0.75 } },
         blur: { lineStyle: { opacity: 0.06 }, itemStyle: { opacity: 0.14 }, label: { opacity: 0.2 } },
-        labelLayout: pinned ? { hideOverlap: false } : { hideOverlap: true },
+        labelLayout: { hideOverlap: false },   // 겹침은 placeLabels 가 직접 처리
         z: pinned ? 6 : hl ? 5 : dim ? 1 : 3,
         animationDuration: 550, animationEasing: "cubicOut",
       });
     }
+    placeLabels(series, V, narrow, { txt, txt2, halo, font });
     // 가성비 경계선: 흑백 점선 + 은은한 빛, 아래에 '오차 범위' 띠
     if (front.length >= 2) {
       const pts = front.map((p) => [p.x, +p.v.score.toFixed(2)]);
@@ -548,7 +621,7 @@
   function tipHtml(v) {
     const M = v.m, c = confOf(v.se), col = colorOf(M.company);
     let h = `<div class="tip"><div class="tip-h"><span class="sw" style="background:${col}"></span>${esc(M.name)}</div>`;
-    h += `<div class="tip-sub">${esc(v.eff)}${v.eff !== v.effKo ? " · " + esc(v.effKo) : ""}${v.isDefault ? " · 기본값" : ""}</div>`;
+    h += `<div class="tip-sub">${esc(v.eff)}${v.effKo ? " · " + esc(v.effKo) : ""}${v.isDefault ? " · 기본값" : ""}</div>`;
     h += `<div class="tip-score"><b>${v.score.toFixed(1)}</b><span>±${v.se.toFixed(1)} · 신뢰도 ${c.t}</span></div>`;
     h += `<div class="tip-row"><span>문제당 비용</span><b>${fmtCost(v.cost)}${v.costKind && v.costKind !== "측정" ? ` <span class="muted">(${esc(v.costKind)})</span>` : ""}</b></div>`;
     if (v.costOk != null) h += `<div class="tip-row"><span>맞힌 문제당 <span class="muted">(${esc(diff().label)} ${Math.round(v.acc * 100)}%)</span></span><b>${fmtCost(v.costOk)}</b></div>`;
@@ -564,7 +637,9 @@
     if (how) h += `<div class="tip-sep"></div><div class="tip-row"><span>설정</span><span class="${how.code ? "tip-code" : ""}">${esc(how.v)}</span></div>`;
     h += `<div class="tip-sep"></div>`;
     for (const p of v.parts) h += `<div class="tip-row"><span>${esc(srcName(p.s))}${p.est ? " (추정)" : ""}</span><b>${p.m.toFixed(1)}</b></div>`;
-    h += `<div class="tip-hint">${esc(M.company)} · ${esc(M.date || "?")} 출시 · 누르면 고정</div></div>`;
+    const pinHint = S.pinned.includes(M.key) ? (S.selected === M.key && S.selEffort === v.effort ? "누르면 고정 해제" : "누르면 이 등급 설명 보기")
+      : CAN_HOVER ? "누르면 고정" : "한 번 더 누르면 고정";
+    h += `<div class="tip-hint">${esc(M.company)} · ${esc(M.date || "?")} 출시 · ${pinHint}</div></div>`;
     return h;
   }
 
@@ -686,15 +761,19 @@
   // 그래프를 눌러 확대 모드를 켜면, 손을 뗀 뒤 그래프가 화면 가운데 오도록 페이지를 부드럽게 옮긴다
   // (누르는 도중에 움직이면 다른 점이 눌릴 수 있어서 손을 뗀 다음에 옮김)
   let centerAfterUp = false;
-  chartEl.addEventListener("pointerdown", (e) => {
-    if (e.pointerType === "touch") return;
+  // 그래프의 빈 곳을 누르면 확대 모드. 점·선을 누르면 고정만 하고 확대 모드는 켜지 않음
+  //  (점을 눌러 모델을 고정한 뒤 아래 상세로 페이지를 스크롤할 수 있게)
+  chart.getZr().on("mousedown", (e) => {
+    const ne = e.event || {};
+    if (ne.pointerType === "touch" || String(ne.type || "").startsWith("touch")) return;
+    const r = fxLayer().getBoundingClientRect();
+    if (e.target) { if (zoomOn) ripple(ne.clientX - r.left, ne.clientY - r.top, false); return; }
     const first = !zoomOn;
     if (first && !chartBox.classList.contains("full")) centerAfterUp = true;
     setZoomOn(true);
-    const r = fxLayer().getBoundingClientRect();
-    ripple(e.clientX - r.left, e.clientY - r.top, first);
+    ripple(ne.clientX - r.left, ne.clientY - r.top, first);
     if (first) burst();
-  }, true);
+  });
 
   // 확대 모드 효과
   //  · 켜질 때: 누른 자리에서 큰 물결 + 번쩍임, 테두리 밖으로 퍼지는 파동, 안내 표시가 튀어오름
@@ -764,14 +843,17 @@
   document.addEventListener("keydown", (e) => {
     if (!zoomOn || !SCROLL_KEYS.has(e.key)) return;
     const t = e.target;
-    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(t.tagName) || t.hasAttribute("tabindex"))) return;
     e.preventDefault();
   });
   chartEl.addEventListener("wheel", (e) => {
     const rect = chartEl.getBoundingClientRect();
     const px = e.clientX - rect.left, py = e.clientY - rect.top;
     if (!zoomOn) {
-      if (FULL && inGrid(px, py)) showToast("그래프를 한 번 클릭하면 휠로 확대할 수 있어요");   // 페이지는 그대로 스크롤
+      if (FULL && inGrid(px, py) && wheelHintN < 3 && Date.now() - wheelHintT > 8000) {   // 페이지는 그대로 스크롤
+        wheelHintN++; wheelHintT = Date.now();
+        showToast("그래프 빈 곳을 한 번 클릭하면 휠로 확대할 수 있어요");
+      }
       return;
     }
     e.preventDefault();
@@ -874,14 +956,25 @@
   chart.getZr().on("mousemove", (e) => {
     if (!e.target && hoverSeries != null) { chart.dispatchAction({ type: "downplay", seriesIndex: hoverSeries }); hoverSeries = null; }
   });
+  let lastTapKey = null;
+  let wheelHintN = 0, wheelHintT = 0;
   chart.on("click", (p) => {
     if (suppressClick) return;
-    if (p.data && p.data.v) togglePin(p.data.v.m.key, p.data.v.effort);
-    else if (p.seriesType === "line" && seriesKey(p)) togglePin(seriesKey(p));
+    if (p.data && p.data.v) {
+      // 휴대폰(터치): 처음 누르면 설명만 보여 주고, 같은 점을 한 번 더 누르면 고정
+      if (!CAN_HOVER) { const k = vkey(p.data.v); if (lastTapKey !== k) { lastTapKey = k; return; } lastTapKey = null; }
+      togglePin(p.data.v.m.key, p.data.v.effort);
+    } else if (p.seriesType === "line" && seriesKey(p)) togglePin(seriesKey(p));
   });
 
   // ───────── 고정 (비교)
   function togglePin(key, effort) {
+    // 이미 고정한 모델의 다른 등급을 누르면: 고정은 그대로 두고 그 등급을 보여 줌
+    if (S.pinned.includes(key) && effort && (S.selected !== key || S.selEffort !== effort)) {
+      S.selected = key; S.selEffort = effort;
+      save(); render();
+      return;
+    }
     if (S.pinned.includes(key)) {
       S.pinned = S.pinned.filter((k) => k !== key);
       if (S.selected === key) { S.selected = S.pinned[S.pinned.length - 1] || null; S.selEffort = null; }
@@ -895,7 +988,7 @@
     if (!S.pinned.includes(key)) S.pinned = [...S.pinned, key].slice(-8);
     S.selected = key; S.selEffort = effort || null;
     save(); render();
-    setTimeout(() => $("#detail").scrollIntoView({ behavior: REDUCED ? "auto" : "smooth", block: "center" }), 120);
+    setTimeout(() => $("#detail").scrollIntoView({ behavior: REDUCED ? "auto" : "smooth", block: "start" }), 480);
   }
   function renderPinBar() {
     const el = $("#pinBar");
@@ -949,12 +1042,14 @@
       const t = document.createElement("span"); t.textContent = g;
       const n = document.createElement("span"); n.className = "cnt"; n.textContent = cnt[g] || 0;
       chip.append(t, n);
-      chip.onclick = () => { S.hidden = S.hidden.includes(g) ? S.hidden.filter((x) => x !== g) : [...S.hidden, g]; save(); render(); };
-      chip.onmouseenter = () => setHoverCo(g);
-      chip.onmouseleave = () => setHoverCo(null);
+      chip.setAttribute("aria-pressed", String(!S.hidden.includes(g)));
+      chip.onclick = () => { hoverCo = null; S.hidden = S.hidden.includes(g) ? S.hidden.filter((x) => x !== g) : [...S.hidden, g]; save(); render(); };
+      // 마우스로 올렸을 때만 강조 (휴대폰 터치는 강조하지 않음), 숨긴 회사는 강조하지 않음 (그래프 전체가 흐려지지 않게)
+      chip.onpointerenter = (e) => { if (e.pointerType === "mouse" && !S.hidden.includes(g)) setHoverCo(g); };
+      chip.onpointerleave = () => setHoverCo(null);
       el.append(chip);
     }
-    el.onmouseleave = () => setHoverCo(null);
+    el.onpointerleave = () => setHoverCo(null);
   }
   // 강조할 회사가 바뀌면 그래프만 움직임 없이 바로 다시 그림
   function setHoverCo(g) {
@@ -970,14 +1065,21 @@
   const ICON_VALUE = `<svg viewBox="0 0 24 24"><path d="M12 2v20M17 6.5C17 4.6 14.8 3.5 12 3.5S7 4.6 7 6.5 9 9.2 12 10s5 2 5 4-2.2 3.5-5 3.5-5-1.1-5-3"/></svg>`;
   function renderCards(points) {
     const el = $("#cards");
-    const all = points.map((p) => p.v);
+    // 그래프에 실제로 그려진 점만 (비용이 없어 그래프에 없는 점은 카드에도 넣지 않음 → 그래프 순서와 똑같이)
+    const all = points.filter((p) => p.x != null).map((p) => p.v);
     // 그래프와 같은 기준: 가격표로 짐작한 비용은 빼고 (추정 비용 그리기를 켜면 포함), 등급 환산은 포함하되 확실성 표시에서 알려 줌
     const withCost = points.filter((p) => costFor(p.v) != null && (S.estimated || p.v.costKind !== "가격 추정")).map((p) => p.v);
-    if (!all.length) { el.innerHTML = ""; return; }
+    if (!all.length) {
+      el.innerHTML = `<div class="pick pick-empty">${S.search.trim() ? "검색한 모델이 없어요. 이름 일부만 쳐도 되고, 쉼표로 여러 개를 찾을 수 있어요." : "보이는 모델이 없어요. 그래프 위 회사 버튼을 눌러 다시 켜 보세요."}</div>`;
+      return;
+    }
+    if (el.querySelector(".pick-empty")) el.innerHTML = "";
 
     // ── 최고 성능 1·2·3위: 그래프의 점(모델 × 등급) 전체를 종합 성능 점수 높은 순으로 (그래프 높이 순서와 똑같이)
     const topRows = all.slice().sort((a, b) => b.score - a.score).slice(0, 3);
     const top = topRows[0];
+    // 1위와 겨루는 상대 = 다른 모델 중 가장 높은 점 (같은 모델의 다른 등급끼리 '공동 1위'라 하지 않게)
+    const rival = all.slice().sort((a, b) => b.score - a.score).find((v) => v.m !== top.m) || null;
     const band = (v, w = top) => Math.sqrt(w.se ** 2 + v.se ** 2);   // 두 점수를 비교할 때의 오차 범위
 
     // ── 가성비 추천 1위: "최고 성능과 실력 차이가 오차 범위 안인 것" 중 가장 싼 것
@@ -999,39 +1101,42 @@
     const lo = Math.min(...topRows.concat(valueRows).map((v) => v.score)) - 3;
     const barW = (v) => Math.max(6, Math.min(100, ((v.score - lo) / (top.score - lo)) * 100));
     const cmp = (v) => {
-      if (v === top) return "비교 기준 (최고 성능 1위)";
+      if (v === top) return "이 모델이 비교 기준";
       const gap = top.score - v.score;
-      let t = gap < 0.05 ? "성능 같음" : `성능 −${gap.toFixed(1)}점`;
+      let t = gap < 0.05 ? "성능 같음" : `<span class="nw">성능 −${gap.toFixed(1)}점</span>`;
       const c = costFor(v);
       if (topCost && c) {
-        const d = Math.round((1 - c / topCost) * 100);
-        t += d > 0 ? ` · <span class="up">비용 ${d}% 절약</span>` : d < 0 ? ` · <span class="down">비용 ${-d}% 더 듦</span>` : " · 비용 같음";
+        // 절약은 99%를 넘지 않게 (반올림으로 '100% 절약'이 되지 않게), 2배 이상 비싸면 '○배'가 읽기 쉬움
+        const save = (1 - c / topCost) * 100, ratio = c / topCost;
+        t += save >= 0.5 ? ` · <span class="up nw">비용 ${Math.min(99, Math.round(save))}% 절약</span>`
+          : ratio >= 2 ? ` · <span class="down nw">비용 ${ratio.toFixed(1)}배</span>`
+          : save <= -0.5 ? ` · <span class="down nw">비용 ${Math.round(-save)}% 더 듦</span>` : " · 비용 같음";
       }
       return t;
     };
     const rowsHtml = (rows) => rows.map((v, i) =>
-      `<div class="vt-row${i === 0 ? " first" : ""}" data-key="${esc(v.m.key)}" data-eff="${esc(v.effort)}">` +
+      `<div class="vt-row${i === 0 ? " first" : ""}" data-key="${esc(v.m.key)}" data-eff="${esc(v.effort)}" tabindex="0" role="button" aria-label="${esc(v.m.name)} ${esc(v.eff)} 자세히 보기">` +
       `<span class="rk">${i + 1}</span>` +
       `<span class="vn"><span class="dot" style="background:${colorOf(v.m.company)}"></span><b>${esc(v.m.name)}</b> <span class="eff-chip sm">${esc(v.eff)}</span></span>` +
       `<span class="vs"><small>성능</small><b>${v.score.toFixed(1)}</b><i class="vbar"><i style="width:${barW(v).toFixed(0)}%"></i></i></span>` +
-      `<span class="vc"><small>비용</small>${fmtCost(costFor(v))}</span>` +
-      `<span class="vd">최고 성능과 비교: ${cmp(v)}</span></div>`).join("");
+      `<span class="vc"><small>${esc(costUnit())}</small>${fmtCost(costFor(v))}</span>` +
+      `<span class="vd"><span class="vd-k">최고 성능과 비교: </span>${cmp(v)}</span></div>`).join("");
     const confHtml = (level, checks, title) =>
-      `<div class="pick-conf ${level.k}" title="${esc(title)}"><span class="lv">${esc(level.t)}</span>` +
+      `<div class="pick-conf ${level.k}" title="${esc(title)}"><span class="lv">${esc(level.t)}${level.x ? `<span class="lv-x"> · ${esc(level.x)}</span>` : ""}</span>` +
       checks.map((c) => `<span class="ck ${c.ok ? "ok" : "no"}">${c.ok ? "✓" : "!"} ${esc(c.t)}</span>`).join("") + `</div>`;
 
     const cards = [];
-    // 최고 성능: 1위가 2위보다 확실히 앞서는지 (차이가 오차 범위보다 큰지)
+    // 최고 성능: 1위 모델이 다른 모델들보다 확실히 앞서는지 (다른 모델 중 1등과의 차이가 오차 범위보다 큰지)
     {
-      const second = topRows[1];
-      const gapOk = !second || top.score - second.score > band(second);
+      const gapOk = !rival || top.score - rival.score > band(rival);
       const checks = [
         top.nReal >= 2 ? { ok: true, t: "두 기관 모두 측정" } : { ok: false, t: "한 기관만 측정" },
-        !second ? { ok: true, t: "비교할 2위 없음" } : gapOk ? { ok: true, t: "2위와 차이가 오차보다 큼" } : { ok: false, t: `2위와 차이 ${(top.score - second.score).toFixed(1)}점 < 오차 ±${band(second).toFixed(1)}` },
+        !rival ? { ok: true, t: "비교할 다른 모델 없음" } : gapOk ? { ok: true, t: `다음 모델(${rival.m.name})보다 확실히 높음` }
+          : { ok: false, t: `${(top.score - rival.score).toFixed(1)}점 차 < 오차 ±${band(rival).toFixed(1)}` },
       ];
-      const level = !gapOk ? { k: "mid", t: "사실상 공동 1위" } : checks[0].ok ? { k: "hi", t: "1위 확실" } : { k: "mid", t: "1위 대체로 확실" };
+      const level = !gapOk ? { k: "mid", t: "사실상 공동 1위", x: rival.m.name } : checks[0].ok ? { k: "hi", t: "1위 확실" } : { k: "mid", t: "1위 대체로 확실" };
       cards.push({ kind: "top", label: "최고 성능", icon: ICON_TOP, sub: "성능 높은 순", tip: "그래프의 모든 점(모델 × 추론 등급) 중 종합 성능 점수가 높은 순서 — 그래프에서 위에 있는 순서와 같아요", v: top,
-        html: rowsHtml(topRows) + confHtml(level, checks, "1위가 2위보다 확실히 앞서는지. 두 점수 차이가 오차 범위보다 크면 확실") });
+        html: rowsHtml(topRows) + confHtml(level, checks, "1위 모델이 다른 모델들보다 확실히 앞서는지. 다른 모델 중 1등과의 점수 차이가 오차 범위보다 크면 확실") });
     }
     // 가성비 추천: 1위 추천이 얼마나 확실한지 (두 기관 측정? 비용 실측? 다음 후보와 가격 차이가 충분한가?)
     if (cheap) {
@@ -1071,16 +1176,24 @@
       if (S.pinnedOnly && S.pinned.length && !S.pinned.includes(M.key)) continue;
       for (const v of S.bestOnly ? [M.best] : M.vs) rows.push(v);
     }
-    const vals = rows.filter((v) => v.cost != null).map((v) => v.score - VALUE_K * Math.log10(v.cost));
+    // 가성비 점수(0~100): 화면에 보이는 줄끼리가 아니라 그 기간의 모든 모델을 기준으로 매김
+    //  → 필터·고정에 따라 같은 모델 점수가 바뀌지 않음. 가격표로 짐작한 비용은 기준에서 뺌
+    const okCost = (v) => v.cost != null && (S.estimated || v.costKind !== "가격 추정");
+    const raw = (v) => v.score - VALUE_K * Math.log10(v.cost);
+    const cutoff = S.period ? monthsAgo(S.period) : null;
+    const base = VIEW.all.filter((M) => !cutoff || (M.date && M.date >= cutoff));   // 검색·회사 숨김과 무관하게 그 기간 전체
+    const vals = base.flatMap((M) => M.vs).filter(okCost).map(raw);
     const vMin = Math.min(...vals), vMax = Math.max(...vals);
-    for (const v of rows) v.value = v.cost != null && vMax > vMin ? Math.round(((v.score - VALUE_K * Math.log10(v.cost)) - vMin) / (vMax - vMin) * 100) : null;
+    for (const v of rows) v.value = okCost(v) && vMax > vMin ? Math.max(0, Math.min(100, Math.round((raw(v) - vMin) / (vMax - vMin) * 100))) : null;
     [...rows].sort((a, b) => b.score - a.score).forEach((v, i) => (v.rank = i + 1));
     const sMin = Math.min(...rows.map((v) => v.score)), sMax = Math.max(...rows.map((v) => v.score));
     const key = {
       rank: (v) => v.rank, name: (v) => v.m.name + effIdx(v.effort), effort: (v) => effIdx(v.effort), score: (v) => v.score,
       cost: (v) => v.cost ?? Infinity, costok: (v) => v.costOk ?? Infinity, value: (v) => v.value ?? -1, price: (v) => blended(v.m) ?? Infinity, date: (v) => v.m.date || "",
     }[S.sortK] || ((v) => v.score);
-    rows.sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * S.sortDir; });
+    if (S.sortK === "name")   // 이름순: 이름을 글자 순서로 비교한 뒤 같은 모델은 등급 순서대로
+      rows.sort((a, b) => (a.m.name.localeCompare(b.m.name, "ko", { numeric: true }) || effIdx(a.effort) - effIdx(b.effort)) * S.sortDir);
+    else rows.sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * S.sortDir; });
     const tb = $("#table tbody");
     tb.innerHTML = "";
     for (const v of rows.slice(0, tableLimit)) {
@@ -1090,21 +1203,29 @@
       const pct = sMax > sMin ? ((v.score - sMin) / (sMax - sMin)) * 100 : 100;
       tr.innerHTML =
         `<td class="c-rank">${v.rank}</td>` +
-        `<td><span class="mname"><span class="sw" style="background:${colorOf(v.m.company)}"></span>${esc(v.m.name)}</span> ${daysSince(v.m.date) <= 30 ? '<span class="badge new">NEW</span>' : ""}</td>` +
-        `<td class="effc"><b>${esc(v.eff)}</b>${v.effort !== "none" ? `<span class="ko">${esc(v.effKo)}</span>` : ""}${v.isDefault ? ' <span class="badge def">기본값</span>' : ""}${!canSelect(v.m, v.effort) ? ' <span class="badge est">선택 불가</span>' : ""}</td>` +
-        `<td class="num"><span class="scorec"><span class="bar"><i style="width:${Math.max(4, pct).toFixed(0)}%"></i></span><b>${v.score.toFixed(1)}</b></span><span class="sub2">±${v.se.toFixed(1)} · 신뢰도 <span class="badge ${c.k}">${c.t}</span></span></td>` +
-        `<td class="num">${fmtCost(v.cost)}${v.costKind && v.costKind !== "측정" ? `<span class="sub2">${esc(v.costKind === "가격 추정" ? "가격표로 추정" : "등급 환산")}</span>` : ""}</td>` +
-        `<td class="num">${fmtCost(v.costOk)}${v.acc ? `<span class="sub2">정답률 ${Math.round(v.acc * 100)}%</span>` : ""}</td>` +
+        `<td class="c-name"><span class="mname"><span class="sw" style="background:${colorOf(v.m.company)}"></span>${esc(v.m.name)}</span> ${daysSince(v.m.date) <= 30 ? '<span class="badge new">NEW</span>' : ""}<span class="m-eff"><b>${esc(v.eff)}</b>${v.isDefault ? " · 기본값" : ""}</span></td>` +
+        `<td class="effc c-eff"><b>${esc(v.eff)}</b>${v.effKo && v.effort !== "none" ? `<span class="ko">${esc(v.effKo)}</span>` : ""}${v.isDefault ? ' <span class="badge def">기본값</span>' : ""}${!canSelect(v.m, v.effort) ? ' <span class="badge est">선택 불가</span>' : ""}</td>` +
+        `<td class="num c-score"><span class="scorec"><span class="bar"><i style="width:${Math.max(4, pct).toFixed(0)}%"></i></span><b>${v.score.toFixed(1)}</b></span><span class="sub2">±${v.se.toFixed(1)}<span class="conf-x"> · 신뢰도 <span class="badge ${c.k}">${c.t}</span></span></span></td>` +
+        `<td class="num c-cost">${fmtCost(v.cost)}${v.costKind && v.costKind !== "측정" ? `<span class="sub2">${esc(v.costKind === "가격 추정" ? "가격표로 추정" : "등급 환산")}</span>` : ""}</td>` +
+        `<td class="num c-costok">${fmtCost(v.costOk)}${v.acc ? `<span class="sub2">정답률 ${Math.round(v.acc * 100)}%</span>` : ""}</td>` +
         `<td class="num">${(() => { const f = FR.status.get(vkey(v)); return f && f.st === "front" ? '<span class="badge fr">경계선</span> ' : f && f.st === "near" ? '<span class="badge nr">동급</span> ' : ""; })()}${v.value ?? "—"}</td>` +
-        `<td class="num">${v.m.price ? `${fmtPrice(v.m.price.in)} / ${fmtPrice(v.m.price.out)}` : "—"}</td>` +
-        `<td>${esc(v.m.date || "—")}</td>`;
+        `<td class="num c-price">${v.m.price ? `${fmtPrice(v.m.price.in)} / ${fmtPrice(v.m.price.out)}` : "—"}</td>` +
+        `<td class="c-date">${esc(v.m.date || "—")}</td>`;
       tr.onclick = () => togglePin(v.m.key, v.effort);
+      tr.tabIndex = 0;
       tb.append(tr);
     }
+    $("#table").classList.toggle("x-cost", S.x === "cost");   // 휴대폰: 지금 가로축과 같은 비용 칸만 보임
     $("#moreRows").hidden = rows.length <= tableLimit;
     $("#moreRows").textContent = `더 보기 (${rows.length - tableLimit}개 더)`;
-    $("#tableSub").textContent = `${rows.length}개 · 줄을 누르면 그래프에 고정돼요 · 제목을 누르면 정렬`;
-    $$("#table th").forEach((th) => { th.classList.toggle("sorted", th.dataset.k === S.sortK); th.classList.toggle("asc", th.dataset.k === S.sortK && S.sortDir === 1); });
+    $("#tableSub").innerHTML = `${rows.length}개 · 줄을 누르면 그래프에 고정돼요 · 제목을 누르면 정렬` +
+      `<span class="m-only"><br><span class="nw">가성비 = 돈 대비 성능 (0~100, 높을수록 좋음)</span> · <span class="nw"><span class="badge fr"></span>경계선 위</span> <span class="nw"><span class="badge nr"></span>사실상 동급</span></span>`;
+    $$("#table th").forEach((th) => {
+      const on = th.dataset.k === S.sortK;
+      th.classList.toggle("sorted", on); th.classList.toggle("asc", on && S.sortDir === 1);
+      th.tabIndex = 0;
+      th.setAttribute("aria-sort", on ? (S.sortDir === 1 ? "ascending" : "descending") : "none");
+    });
   }
   $$("#table th").forEach((th) => {
     th.onclick = () => {
@@ -1128,7 +1249,7 @@
     h += `<div class="d-meta"><span>${esc(M.company)}</span><span>${esc(M.date || "?")} 출시</span>${m.price ? `<span>가격표 입력 $${m.price.in} · 출력 $${m.price.out} <span class="muted">/100만 토큰</span></span>` : ""}</div></div>`;
     h += `<button class="btn btn-ghost d-close" type="button" id="closeDetail">닫기</button></div>`;
 
-    h += `<div class="dcols"><div class="dcol"><div class="sect">추론 등급별 <span class="muted" style="letter-spacing:0;font-weight:500">줄을 누르면 오른쪽 설명이 바뀌어요</span></div>`;
+    h += `<div class="dcols"><div class="dcol"><div class="sect">추론 등급별 <span class="muted" style="letter-spacing:0;font-weight:500">줄을 누르면 설명이 바뀌어요</span></div>`;
     h += `<table class="dt"><thead><tr><th>등급</th><th class="num">점수</th><th class="num">문제당 비용</th><th>한 단계 올리면</th></tr></thead><tbody>`;
     M.vs.forEach((v, i) => {
       const prev = M.vs[i - 1];
@@ -1137,7 +1258,7 @@
         const ds = v.score - prev.score, cr = v.cost && prev.cost ? v.cost / prev.cost : null;
         step = `<span class="step"><span class="${ds >= 0 ? "up" : "dn"}">${ds >= 0 ? "+" : ""}${ds.toFixed(1)}점</span>${cr ? ` · 비용 ${cr.toFixed(1)}배` : ""}</span>`;
       }
-      h += `<tr data-e="${esc(v.effort)}" class="eff-row${S.selEffort === v.effort ? " hl" : ""}"><td><b>${esc(v.eff)}</b>${v.effort !== "none" ? ` <span class="muted small">${esc(v.effKo)}</span>` : `<br><span class="muted small">${esc(v.effKo)}</span>`}${v.isDefault ? ' <span class="badge def">기본값</span>' : ""}${!canSelect(m, v.effort) ? ' <span class="badge est">선택 불가</span>' : ""}</td>` +
+      h += `<tr data-e="${esc(v.effort)}" class="eff-row${S.selEffort === v.effort ? " hl" : ""}" tabindex="0"><td><b>${esc(v.eff)}</b>${v.effKo ? `<span class="muted small ko-line">${esc(v.effKo)}</span>` : ""}${v.isDefault ? ' <span class="badge def">기본값</span>' : ""}${!canSelect(m, v.effort) ? ' <span class="badge est">선택 불가</span>' : ""}</td>` +
         `<td class="num"><b>${v.score.toFixed(1)}</b><span class="muted small"> ±${v.se.toFixed(1)}</span></td>` +
         `<td class="num">${fmtCost(v.cost)}${v.costKind && v.costKind !== "측정" ? `<br><span class="badge est">${esc(v.costKind)}</span>` : ""}</td><td>${step}</td></tr>`;
     });
@@ -1194,15 +1315,25 @@
   // 드롭다운 메뉴
   function bindMenu(id) {
     const menu = $("#" + id);
-    menu.querySelector(".menu-btn").onclick = (e) => {
+    const btn = menu.querySelector(".menu-btn");
+    btn.setAttribute("aria-expanded", "false");
+    btn.onclick = (e) => {
       e.stopPropagation();
       const was = menu.classList.contains("open");
-      $$(".menu.open").forEach((m) => m.classList.remove("open"));
-      if (!was) menu.classList.add("open");
+      closeMenus();
+      if (!was) { menu.classList.add("open"); btn.setAttribute("aria-expanded", "true"); }
     };
     menu.querySelector(".menu-pop").addEventListener("click", (e) => e.stopPropagation());
   }
-  document.addEventListener("click", () => $$(".menu.open").forEach((m) => m.classList.remove("open")));
+  function closeMenus() {
+    $$(".menu.open").forEach((m) => { m.classList.remove("open"); m.querySelector(".menu-btn").setAttribute("aria-expanded", "false"); });
+  }
+  document.addEventListener("click", closeMenus);
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const t = e.target;
+    if (t && t.matches && t.matches(".vt-row, #table tbody tr, #table th, .pin, .dt tr.eff-row")) { e.preventDefault(); t.click(); }
+  });
   bindMenu("perCoMenu");
   bindMenu("viewMenu");
   const perCoPop = $("#perCoMenu .menu-pop");
@@ -1220,7 +1351,7 @@
   $("#search").oninput = (e) => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { S.search = e.target.value; save(); render(); }, 180); };
 
   function syncControls() {
-    const on = (id, v) => $$(`#${id} button`).forEach((b) => b.classList.toggle("on", b.dataset.v === String(v)));
+    const on = (id, v) => $$(`#${id} button`).forEach((b) => { b.classList.toggle("on", b.dataset.v === String(v)); b.setAttribute("aria-pressed", String(b.dataset.v === String(v))); });
     on("xAxisSeg", S.x); on("periodSeg", S.period);
     $("#perCoText").textContent = S.perCo ? `${S.perCo}개` : "전부";
     $$("#perCoMenu .menu-item").forEach((b) => b.classList.toggle("on", +b.dataset.v === S.perCo));
@@ -1280,7 +1411,7 @@
   window.addEventListener("popstate", () => { if (chartBox.classList.contains("full")) setFull(false, true); });
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
-    $$(".menu.open").forEach((m) => m.classList.remove("open"));
+    closeMenus();
     if (chartBox.classList.contains("full")) setFull(false);
     else setZoomOn(false);
   });
@@ -1289,20 +1420,21 @@
     S.theme = cur === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = S.theme;
     document.querySelector('meta[name="theme-color"]').content = S.theme === "light" ? "#f5f4f0" : "#0b0b0c";
-    save(); render();
+    colorCache = {}; save(); render();
   };
   matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => { if (!S.theme) render(); });
 
   // ───────── 머리글·바닥글
   const HOSTED = location.protocol === "https:" && !/^(localhost|127\.)/.test(location.hostname);
-  const genTs = new Date(D.generated.replace(" ", "T")).getTime();
+  const genTs = new Date(String(D.generated || "").replace(" ", "T")).getTime() || Date.now();
   function renderStatus() {
     const ageH = (Date.now() - genTs) / 3600000;
-    $("#status").innerHTML = `<span class="live${ageH > 12 ? " old" : ""}"></span><span><b>${ago(genTs)}</b> 갱신${HOSTED ? " · 6시간마다 자동" : ""}</span>`;
+    $("#status").innerHTML = `<span class="live${ageH > 12 ? " old" : ""}"></span><span><b>${ago(genTs)}</b><span class="st-x"> 갱신${HOSTED ? " · 6시간마다 자동" : ""}</span></span>`;
     $("#status").title = "마지막 갱신 " + D.generated;
   }
   renderStatus();
   setInterval(renderStatus, 60000);
+  try {
   (function healthNotice() {
     const H = D.health || {};
     const failed = (H.failed || []).filter((x) => x !== "OpenRouter");
@@ -1315,7 +1447,9 @@
     if (!(age > 12)) return;
     notice(`${esc((H.failed || ["일부 기관"]).join(", "))} 데이터를 새로 받지 못해 <b>${esc(D.generated)}</b> 기준 정상 데이터를 보여 주고 있어요. 6시간마다 자동으로 다시 시도해요.`);
   })();
+  } catch (e) { /* 이 부분이 실패해도 나머지 화면은 그대로 */ }
   // 믿을 만한 정도: 두 기관이 같은 등급을 쟀을 때 점수가 얼마나 비슷한지 (보정 없이 원래 값 그대로)
+  try {
   (function eyebrow() {
     const dis = computeAll().flatMap((M) => M.vs).map((v) => v.disagree).filter((x) => x != null).sort((a, b) => a - b);
     const med = dis.length ? dis[Math.floor(dis.length / 2)] : null;
@@ -1324,6 +1458,8 @@
     el.textContent = `Epoch AI · Artificial Analysis 점수 합산` + (med != null ? ` · 두 기관 차이 보통 ${med.toFixed(1)}점` : "") + ` · 모델 ${D.models.length}개`;
     if (med != null) el.title = `두 기관이 모두 잰 등급 ${dis.length}개에서, 두 점수 차이의 중앙값이 ${med.toFixed(1)}점입니다.` + (r ? ` 점수 상관 ${r.toFixed(2)} (1 에 가까울수록 두 기관이 같은 순서로 평가).` : "") + ` 작을수록 믿을 만합니다.`;
   })();
+  } catch (e) { /* 이 부분이 실패해도 나머지 화면은 그대로 */ }
+  try {
   (function footer() {
     const src = SRC_ORDER.filter((s) => D.sources[s] && D.sources[s].ok).map((s) => {
       const I = D.sources[s];
@@ -1333,6 +1469,7 @@
       `<div class="fine">Epoch AI 데이터는 CC-BY 4.0 (Epoch AI, "Capabilities & benchmarking", epoch.ai). 지능 지수 출처: Artificial Analysis (artificialanalysis.ai). ` +
       `이 페이지의 점수는 두 기관의 공개 결과를 자체 방식으로 합친 것이며 기관의 공식 순위가 아닙니다. 마지막 갱신 ${esc(D.generated)}</div>`;
   })();
+  } catch (e) { /* 이 부분이 실패해도 나머지 화면은 그대로 */ }
 
   // ───────── 알림
   function notice(html, kind, action) {

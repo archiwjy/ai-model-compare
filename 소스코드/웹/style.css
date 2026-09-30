@@ -16,7 +16,7 @@
   --line-3: rgba(255, 255, 255, 0.22);
   --text: #f3f2ee;
   --text-2: #b9b8b1;
-  --muted: #7f7e78;
+  --muted: #8f8e88;
   --ink: #f3f2ee;          /* 선택된 버튼 등 강조 (흑백) */
   --ink-text: #0b0b0c;
   --grid: rgba(255, 255, 255, 0.055);
@@ -45,13 +45,14 @@
   --line-3: rgba(10, 10, 10, 0.24);
   --text: #111110;
   --text-2: #4d4c48;
-  --muted: #8b8a84;
+  --muted: #6b6a65;
   --ink: #111110;
   --ink-text: #ffffff;
   --grid: rgba(0, 0, 0, 0.06);
   --axis: rgba(0, 0, 0, 0.16);
   --frontier: #111110;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 18px 40px -26px rgba(0, 0, 0, 0.25);
+  --good: #0b7a54; --warn: #946000; --bad: #c73a3a;
   --c1: #2a6fdb; --c2: #e8612c; --c3: #139d6c; --c4: #d19400;
   --c5: #d8497f; --c6: #1f8f33; --c7: #6e5ae0; --c8: #e03e3e; --c0: #8d8c86;
 }
@@ -61,10 +62,11 @@
     --bg: #f5f4f0; --bg-glow: rgba(90, 110, 255, 0.10);
     --surface: #ffffff; --surface-2: #f7f6f2; --surface-3: #efeee9;
     --line: rgba(10, 10, 10, 0.07); --line-2: rgba(10, 10, 10, 0.12); --line-3: rgba(10, 10, 10, 0.24);
-    --text: #111110; --text-2: #4d4c48; --muted: #8b8a84;
+    --text: #111110; --text-2: #4d4c48; --muted: #6b6a65;
     --ink: #111110; --ink-text: #ffffff;
     --grid: rgba(0, 0, 0, 0.06); --axis: rgba(0, 0, 0, 0.16); --frontier: #111110;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 18px 40px -26px rgba(0, 0, 0, 0.25);
+    --good: #0b7a54; --warn: #946000; --bad: #c73a3a;
     --c1: #2a6fdb; --c2: #e8612c; --c3: #139d6c; --c4: #d19400;
     --c5: #d8497f; --c6: #1f8f33; --c7: #6e5ae0; --c8: #e03e3e; --c0: #8d8c86;
   }
@@ -245,11 +247,19 @@ kbd { font: 600 11px/1 ui-monospace, Consolas, monospace; padding: 2px 5px; bord
 .ctl { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .ctl-label { font-size: 12.5px; color: var(--muted); font-weight: 600; white-space: nowrap; }
 @media (max-width: 700px) {
-  .dock { top: 54px; margin: 0 -12px 10px; padding: 8px 12px; }
-  .dock-in { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 14px; padding-bottom: 2px; }
+  /* 흐림 효과(backdrop-filter)가 있으면 아래에서 올라오는 메뉴의 위치 기준이 막대로 바뀌어 화면 밖으로 나감 → 휴대폰은 단색 배경 */
+  .dock { top: 54px; margin: 0 -12px 10px; padding: 8px 12px; background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .dock-in { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 14px; padding-bottom: 2px; padding-right: 28px; }
+  /* 오른쪽에 버튼이 더 있다는 표시 (마스크를 쓰면 막대 밖으로 나오는 메뉴까지 잘려서, 위에 그라데이션을 얹음) */
+  .dock::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 34px; pointer-events: none;
+    background: linear-gradient(90deg, transparent, var(--bg)); }
   .dock-in::-webkit-scrollbar { display: none; }
   .ctl, .search, .menu { flex: none; }
   .search { width: 190px; }
+  .search input { font-size: 16px; }   /* 아이폰: 16px 보다 작으면 누를 때 화면이 확대됨 */
+  .seg button { padding: 9px 14px; }   /* 손가락으로 누르기 쉽게 */
+  .menu-btn { height: 40px; }
+  .search { height: 40px; }
 }
 
 /* 알약 모양 선택 버튼 (선택 표시가 미끄러지듯 이동) */
@@ -295,7 +305,7 @@ kbd { font: 600 11px/1 ui-monospace, Consolas, monospace; padding: 2px 5px; bord
 .tog i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: transform .25s var(--ease), background .2s; }
 .tog input:checked + i { background: var(--ink); border-color: var(--ink); }
 .tog input:checked + i::after { transform: translateX(14px); background: var(--ink-text); }
-.tog input:focus-visible + i { outline: 2px solid var(--line-3); outline-offset: 2px; }
+.tog input:focus-visible + i { outline: 2px solid var(--ink); outline-offset: 2px; }
 .tog small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
 
 /* ───── 카드 공통 ───── */
@@ -450,7 +460,7 @@ kbd { font: 600 11px/1 ui-monospace, Consolas, monospace; padding: 2px 5px; bord
 }
 
 /* 뱃지 */
-.badge { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 750; padding: 1px 7px; border-radius: 999px; vertical-align: 1px; letter-spacing: .02em; }
+.badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 750; padding: 1px 7px; border-radius: 999px; vertical-align: 1px; letter-spacing: .02em; }
 .badge.new { background: color-mix(in srgb, var(--c2) 18%, transparent); color: var(--c2); }
 .badge.def { background: color-mix(in srgb, var(--c1) 16%, transparent); color: var(--c1); }
 .badge.est { background: var(--surface-3); color: var(--text-2); font-weight: 600; }
@@ -586,7 +596,7 @@ table#table { width: 100%; border-collapse: collapse; font-size: 14px; min-width
 .pick-conf .ck.no { color: var(--warn); }
 .pick-alt { margin-top: 7px; font-size: 12px; color: var(--muted); }
 .pick-alt b { color: var(--text-2); font-weight: 650; }
-.eff-chip.sm { font-size: 10.5px; padding: 1px 6px; }
+.eff-chip.sm { font-size: 11px; padding: 1px 6px; }
 .pick-note .muted { color: var(--muted); font-weight: 500; }
 @media (max-width: 700px) { .pick-conf .ck { display: none; } .pick-alt { font-size: 11px; } }
 
@@ -618,9 +628,8 @@ table#table { width: 100%; border-collapse: collapse; font-size: 14px; min-width
   .vt-row .vn { font-size: 12px; }
   .vt-row .vn .dot { display: none; }
   .vt-row .vs, .vt-row .vc { font-size: 12px; text-align: left; }
-  .vt-row .vd { font-size: 10.5px; }
+  .vt-row .vd { font-size: 11px; }
   .pick-table .pick-conf .ck { display: none; }
-}
 }
 
 /* 최고 성능 표: 1위는 금색, 가성비 표 1위는 초록 */
@@ -632,3 +641,63 @@ table#table { width: 100%; border-collapse: collapse; font-size: 14px; min-width
 .pick-label { white-space: nowrap; }
 .pick-table .pick-sub { cursor: help; }
 
+
+/* ───── 최종 점검 수정 ───── */
+.nw { white-space: nowrap; }                       /* 숫자와 단위가 줄바꿈으로 떨어지지 않게 */
+.m-eff { display: none; }                           /* 휴대폰 순위표: 모델 이름 아래 등급 */
+.ko-line { display: block; margin-top: 1px; }      /* 상세 표: 등급 뜻은 다음 줄 (단어 중간 줄바꿈 방지) */
+.dt th { white-space: nowrap; }
+.search { max-width: 420px; }
+@media (max-width: 700px) {
+  .status { display: flex; font-size: 12px; gap: 6px; margin-left: auto; }   /* 휴대폰에서도 갱신 시각 */
+  .status .st-x { display: none; }
+  .top-actions { margin-left: 8px; }
+  .vt-row .vd-k { display: none; }                  /* 좁은 화면: '최고 성능과 비교:' 머리말 생략 */
+  table#table { min-width: 0; font-size: 13px; }
+  #table .c-eff, #table .c-price, #table .c-date { display: none; }
+  #table .c-cost { display: none; }
+  #table.x-cost .c-cost { display: table-cell; }
+  #table.x-cost .c-costok { display: none; }
+  #table th, #table td { padding: 10px 6px; }
+  #table td.c-name { white-space: normal; }
+  #table .m-eff { display: block; margin-top: 3px; font-size: 11.5px; color: var(--muted); }
+  #table .m-eff b { font: 600 11.5px ui-monospace, Consolas, monospace; color: var(--text-2); }
+  #table .badge.new { display: none; }
+  #table .conf-x { display: none; }                 /* 점수 아래는 ±만 */
+  #table .mname { white-space: nowrap; }
+  #table td.c-name .mname .sw { flex: none; }
+  #table td.c-rank { width: 22px; padding-right: 2px; }
+  /* 가성비 칸: '경계선'은 채운 점, '동급'은 점선 동그라미로 작게 */
+  #table .badge.fr, #table .badge.nr { font-size: 0; width: 9px; height: 9px; padding: 0; border-radius: 50%; display: inline-block; vertical-align: middle; margin-right: 4px; }
+  #table .badge.nr { border-width: 1.5px; }
+  #table .scorec .bar { display: none; }
+}
+
+/* 키보드로 이동할 때 초점이 잘 보이게 */
+.vt-row:focus-visible, #table tbody tr:focus-visible, #table th:focus-visible, .pin:focus-visible, .dt tr.eff-row:focus-visible,
+.chip:focus-visible, .tbtn:focus-visible, .seg button:focus-visible, .menu-btn:focus-visible, .btn:focus-visible, .menu-item:focus-visible {
+  outline: 2px solid var(--ink); outline-offset: 2px; }
+#table tbody tr:focus-visible { outline-offset: -2px; }
+/* 아이폰 노치·홈 막대 피하기 */
+.topbar-in { padding-left: max(28px, env(safe-area-inset-left)); padding-right: max(28px, env(safe-area-inset-right)); }
+.chart-box.full { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); padding-bottom: max(6px, env(safe-area-inset-bottom)); }
+/* 보이는 모델이 없을 때 안내 */
+.chart-empty { position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); z-index: 4; max-width: 86%; text-align: center;
+  padding: 14px 20px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line-2); color: var(--text-2); font-size: 14px; font-weight: 600; line-height: 1.5; }
+.chart-empty[hidden] { display: none; }
+.pick-empty { grid-column: 1 / -1; padding: 22px; font-size: 14px; color: var(--text-2); cursor: default; }
+@media (max-width: 700px) {
+  .topbar-in { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+  /* 손가락으로 누르기 쉽게 (40px 안팎) */
+  .chip { height: 34px; }
+  .tbtn { height: 38px; min-width: 38px; }
+  .pin { height: 34px; }
+  .pin .x { width: 30px; height: 30px; }
+  .pin-clear { padding: 8px 6px; }
+}
+.m-only { display: none; }
+@media (max-width: 700px) {
+  .m-only { display: inline; }
+  #tableSub .badge.fr, #tableSub .badge.nr { font-size: 0; width: 9px; height: 9px; padding: 0; border-radius: 50%; display: inline-block; vertical-align: middle; margin: 0 3px 0 4px; }
+}
+@media (max-width: 700px) { .pick-conf .lv-x { display: none; } }   /* 휴대폰: '사실상 공동 1위'만 짧게 */
