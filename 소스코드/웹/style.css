@@ -631,3 +631,8 @@ table#table { width: 100%; border-collapse: collapse; font-size: 14px; min-width
 .vt-row .vd .down { color: var(--bad); font-weight: 700; }
 .pick-label { white-space: nowrap; }
 .pick-table .pick-sub { cursor: help; }
+
+/* 용도(분야) 설명 */
+.cat-note { margin: 2px 4px 6px; padding: 9px 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); font-size: 12.5px; line-height: 1.55; color: var(--text-2); animation: pop .2s var(--ease) both; }
+.cat-note b { color: var(--text); }
+.cat-note .muted { color: var(--muted); font-size: 11.5px; }

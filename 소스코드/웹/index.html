@@ -60,6 +60,10 @@
   <!-- ───────── 조절 막대 (스크롤해도 따라옴) ───────── -->
   <section class="dock" id="dock">
     <div class="dock-in">
+      <div class="ctl" id="catCtl" hidden>
+        <span class="ctl-label" title="어디에 쓸지 고르면 그래프·추천·순위가 그 분야 점수로 바뀌어요">용도</span>
+        <div class="seg" id="catSeg"></div>
+      </div>
       <div class="ctl">
         <span class="ctl-label">가로축</span>
         <div class="seg" id="xAxisSeg">
@@ -129,6 +133,7 @@
         </button>
       </div>
     </div>
+    <div class="cat-note" id="catNote" hidden></div>
     <div class="pinbar" id="pinBar"></div>
     <div class="chart-wrap">
       <div class="axis-y" id="axisY">종합 성능 점수 ↑</div>
@@ -169,7 +174,7 @@
           <th data-k="rank" class="c-rank">#</th>
           <th data-k="name">모델</th>
           <th data-k="effort">추론 등급</th>
-          <th data-k="score" class="num">종합 점수</th>
+          <th data-k="score" class="num" id="scoreTh">종합 점수</th>
           <th data-k="cost" class="num">문제당 비용</th>
           <th data-k="costok" class="num" title="문제당 비용 ÷ 정답률 (선택한 난이도 기준)">맞힌 문제당</th>
           <th data-k="value" class="num" title="비용이 10배 늘 때 점수가 얼마나 오르는지 기준의 상대 점수 — 높을수록 가성비 좋음">가성비</th>

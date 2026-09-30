@@ -39,6 +39,31 @@ SOURCE_INFO = {
 }
 
 
+# 분야별 점수 (여러 벤치마크를 합쳐 공정하게) — 벤치마크 이름은 Epoch 목록 기준, aa 는 AA 분야 지수
+CATEGORIES = {
+    "agent": {"name": "도구 다루기 (MCP·에이전트)", "short": "도구·MCP",
+              "desc": "MCP·에이전트로 프로그램을 조작하고 여러 단계 작업을 끝까지 해내는 능력",
+              "epoch": {"APEX-Agents": "APEX-Agents (전문 업무)", "OSWorld 2.0": "OSWorld 2.0 (컴퓨터 화면 조작)",
+                        "Remote Labor Index": "Remote Labor Index (실제 외주 작업)"},
+              "aa": "agent", "aa_label": "AA 에이전트 지수"},
+    "code": {"name": "스크립트·코딩", "short": "코딩",
+             "desc": "그래스호퍼·블렌더 스크립트, 자동화 프로그램을 짜는 능력",
+             "epoch": {"DeepSWE": "DeepSWE", "FrontierCode": "FrontierCode", "Terminal Bench": "Terminal Bench",
+                       "SWE-Bench verified": "SWE-bench Verified"},
+             "aa": "code", "aa_label": "AA 코딩 지수"},
+    "space": {"name": "3D·공간·모델링", "short": "3D·모델링",
+              "desc": "3D 형태와 공간을 이해하고 모델링하는 능력",
+              "epoch": {"Furniture Assembly": "Furniture Assembly (3D 조립)", "Blueprint Bench 2": "Blueprint Bench 2 (사진 → 평면도)",
+                        "Surface Evolver Bench": "Surface Evolver (3D 곡면 스크립트)", "CadEval": "CadEval (CAD 모델링)"},
+              "aa": None},
+    "research": {"name": "논문·정확한 지식", "short": "논문·지식",
+                 "desc": "사실을 정확히 말하고(지어내지 않고) 전문 지식으로 조사·정리하는 능력",
+                 "epoch": {"SimpleQA Verified": "SimpleQA Verified (사실 정확성)", "HLE": "HLE (전문가 지식)",
+                           "GPQA diamond": "GPQA Diamond (과학 전문 지식)", "DeepResearch Bench": "DeepResearch Bench (조사 보고서)"},
+                 "aa": None},
+}
+
+
 def log(msg):
     print(msg, flush=True)
 
@@ -164,6 +189,51 @@ def main(force=False):
     n_filled = combine.fill_within_model(mapped)
     log(f"  같은 모델 안에서 채운 점수: {n_filled}개")
 
+    # ── 2-1. 분야별 점수 (종합 점수와 같은 눈금)
+    log("· 분야별 점수 계산 중...")
+    overall = {}
+    for k, per in mapped.items():
+        num = den = 0.0
+        for x in per.values():
+            if len(x) > 2:      # 다른 등급에서 추정한 값은 기준으로 쓰지 않음
+                continue
+            num += x[0] / x[1]
+            den += 1 / x[1]
+        if den:
+            overall[k] = num / den
+    # 등급이 '알 수 없음·기본'으로만 적힌 기록 → 그 모델의 공식 기본 등급(OpenRouter)으로 봄
+    #  (평가기관은 보통 따로 설정하지 않은 기본 상태로 시험함. 그 등급에 실제 기록이 있으면 실제 기록을 씀)
+    #  이렇게 가정한 점수는 화면 말풍선에 '등급 불명 → 기본 등급으로 봄'으로 표시
+    or_prices = raw.get("openrouter", {}).get("prices", {})
+    efforts_of = {}
+    for (b, e) in mapped:
+        efforts_of.setdefault(b, []).append(e)
+    allobs, assumed = {}, {}
+    for bench, d in raw["epoch"].get("allobs", {}).items():
+        nd = {}
+        for (b, e), p in d.items():
+            k = (b, e)
+            if k not in mapped and e in ("unknown", "default", "thinking"):
+                de = (or_prices.get(b) or {}).get("default_effort")
+                if de and (b, de) in mapped:
+                    k = (b, de)
+                elif len(efforts_of.get(b, [])) == 1:
+                    k = (b, efforts_of[b][0])
+                else:
+                    continue
+                if k in d:
+                    continue
+                assumed.setdefault(k, set()).add(bench)
+            nd[k] = max(nd.get(k, 0.0), p)
+        allobs[bench] = nd
+    cat_scores, cat_info = {}, {}
+    for ck, cd in CATEGORIES.items():
+        aa_cat = raw.get("aa", {}).get("cats", {}).get(cd["aa"]) if cd["aa"] else None
+        cat_scores[ck], cat_info[ck] = combine.category_scores(
+            allobs, raw["epoch"]["edi"], overall, list(cd["epoch"]), aa_cat,
+            sigma2=ep_meta.get("sigma2", 0.01))
+        log(f"  {cd['name']}: {cat_info[ck]['count']}개 등급 (시험: {', '.join(cat_info[ck]['tests'])})")
+
     # ── 3. 비용
     log("· 비용 환산 중...")
     merged, cost_info = combine.combine_costs(cost_src)
@@ -200,6 +270,18 @@ def main(force=False):
             v["cost_src"] = c[2]
         if key in aa_speed:
             v["speed"] = round(aa_speed[key], 1)
+        # 분야별 점수 (있는 분야만): {분야: {출처: {m, var, raw 또는 n}}}
+        cv = {}
+        for ck, sc in cat_scores.items():
+            if key in sc:
+                cv[ck] = {s2: ({"m": round(val, 2), "var": round(var, 2), "n": ex} if s2 == "epoch"
+                               else {"m": round(val, 2), "var": round(var, 2), "raw": round(ex, 2)})
+                          for s2, (val, var, ex) in sc[key].items()}
+                asm = len(assumed.get(key, set()) & set(CATEGORIES[ck]["epoch"]))
+                if asm and "epoch" in cv[ck]:
+                    cv[ck]["epoch"]["asm"] = asm     # 이 중 몇 개 시험은 '등급 불명 → 기본 등급'으로 본 것
+        if cv:
+            v["cat"] = cv
         m["variants"].append(v)
 
     out_models = []
@@ -257,6 +339,12 @@ def main(force=False):
         "effort_ladder": {e: round(math.exp(v), 3) for e, v in ladder.items()},
         "effort_ko": EFFORT_KO,
         "effort_order": EFFORT_ORDER,
+        # 실제로 계산에 쓰인 시험 (화면 설명용 이름)
+        "categories": {ck: {"name": cd["name"], "short": cd["short"], "desc": cd["desc"],
+                            "tests": ([cd["aa_label"]] if cd.get("aa") and raw.get("aa", {}).get("cats", {}).get(cd["aa"]) else [])
+                                     + [cd["epoch"][b] for b in cat_info[ck]["tests"]],
+                            "count": cat_info[ck]["count"], "aa_label": cd.get("aa_label")}
+                       for ck, cd in CATEGORIES.items()},
         "models": out_models,
     }
     # 자동 점검용 기록: 실패한 기관, 처음 보는 등급 이름 (화면 알림과 GitHub 알림에 씀)

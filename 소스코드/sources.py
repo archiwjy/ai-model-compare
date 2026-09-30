@@ -99,11 +99,32 @@ def load_epoch(exclude_words):
     model_meta = {r["model_version"]: r for r in read_csv("model_metadata.csv") if r["model_version"]}
     eci = {r["Model"]: r for r in read_csv("eci_scores.csv")}
 
-    obs = {}          # (base, effort) → {bench: 점수}
+    obs = {}          # (base, effort) → {bench: 점수}   (종합 점수용: 난이도표가 있는 벤치마크만)
+    allobs = {}       # bench → {(base, effort): 점수}  (분야별 점수용: 모든 벤치마크)
     info = {}         # base → {name, company, date}
-    for b in bench_meta:
+    # 목록표에 없는 벤치마크 (파일, 점수 열, 무작위 기준, 만점)
+    extra_meta = [{"benchmark": "Blueprint Bench 2", "source_file": "blueprint_bench_2_external.csv",
+                   "score_column": "Score", "scale": "1", "random_baseline": "0", "score_ceiling": "1"}]
+    known_files = {b["source_file"] for b in bench_meta}
+    for b in bench_meta + [x for x in extra_meta if x["source_file"] not in known_files]:
         bname = b["benchmark"]
-        if bname not in edi or not b["source_file"]:
+        if not b["source_file"]:
+            continue
+        if bname not in edi:
+            # 분야별 점수용으로만 원점수 보관
+            col = b["score_column"]
+            scale, bl, ce = float(b["scale"] or 1), float(b["random_baseline"] or 0), float(b["score_ceiling"] or 1)
+            for r in read_csv(b["source_file"]):
+                ver = r.get("Model version")
+                v = _num(r.get(col))
+                if not ver or v is None or _excluded(ver, exclude_words):
+                    continue
+                base, eff = split_name(ver)
+                if not base:
+                    continue
+                p = min(1.0, max(0.0, (v * scale - bl) / (ce - bl)))
+                d = allobs.setdefault(bname, {})
+                d[(base, eff)] = max(d.get((base, eff), 0.0), p)
             continue
         col = b["score_column"]
         scale, bl, ce = float(b["scale"] or 1), float(b["random_baseline"] or 0), float(b["score_ceiling"] or 1)
@@ -115,7 +136,11 @@ def load_epoch(exclude_words):
             p = (v * scale - bl) / (ce - bl)
             p = min(1.0, max(0.0, p))
             base, eff = split_name(ver)
-            if not base or eff == "unknown":
+            if not base:
+                continue
+            a = allobs.setdefault(bname, {})          # 분야별 점수용 (등급 '알 수 없음'도 보관)
+            a[(base, eff)] = max(a.get((base, eff), 0.0), p)
+            if eff == "unknown":
                 continue
             d = obs.setdefault((base, eff), {})
             d[bname] = max(d.get(bname, 0.0), p)   # 같은 벤치마크 여러 번이면 가장 좋은 것 (Epoch 방식)
@@ -169,7 +194,7 @@ def load_epoch(exclude_words):
         updated = "%04d-%02d-%02d" % max(zi.date_time for zi in z.infolist())[:3]
     except ValueError:
         updated = None
-    return {"obs": obs, "edi": edi, "info": info, "costs": costs, "updated": updated}
+    return {"obs": obs, "allobs": allobs, "edi": edi, "info": info, "costs": costs, "updated": updated}
 
 
 # ───────────────────────── LiveBench ─────────────────────────
@@ -314,6 +339,7 @@ def load_aa(exclude_words):
             break
         page += 1
     scores, costs, speed, info = {}, {}, {}, {}
+    cats = {"code": {}, "agent": {}}   # AA 분야별 지수 (코딩 지수, 에이전트 지수)
     for m in items:
         raw = m.get("name") or m.get("slug")
         if not raw or _excluded(raw, exclude_words):
@@ -323,6 +349,9 @@ def load_aa(exclude_words):
         s = ev.get("artificial_analysis_intelligence_index")
         if s is not None:
             scores[key2] = {"raw": raw, "score": float(s)}
+        for ck, field in (("code", "artificial_analysis_coding_index"), ("agent", "artificial_analysis_agentic_index")):
+            if ev.get(field) is not None:
+                cats[ck][key2] = float(ev[field])
         cost = (m.get("artificial_analysis_intelligence_index_cost") or {})
         cpt = (cost.get("cost_per_task") or {}).get("total_cost")
         if cpt:
@@ -333,8 +362,8 @@ def load_aa(exclude_words):
         info[key2[0]] = {"company": (m.get("model_creator") or {}).get("name"), "date": m.get("release_date")}
     if not scores:
         raise RuntimeError("AA 응답에 점수가 없음")
-    return {"scores": scores, "costs": costs, "speed": speed, "info": info, "updated": time.strftime("%Y-%m-%d"),
-            "version": version}
+    return {"scores": scores, "cats": cats, "costs": costs, "speed": speed, "info": info,
+            "updated": time.strftime("%Y-%m-%d"), "version": version}
 
 
 # ───────────────────────── OpenRouter 가격표 ─────────────────────────

@@ -58,7 +58,7 @@
   //  기본값 (사용자가 정함, 2026-09-30): 맞힌 문제당 · 전체 기간 · 매우 어려움 · 회사마다 3개 ·
   //  가성비 경계선·모델 이름 켬 · 추정 비용 끔 · 상위 5개 회사만 (기타 숨김) · 어두운 화면 · 순위표는 성능 높은 순
   const DEFAULTS = {
-    x: "costok", period: 0, perCo: 3, difficulty: "vhard", search: "", hidden: ["기타"], frontier: true, labels: true,
+    cat: "all", x: "costok", period: 0, perCo: 3, difficulty: "vhard", search: "", hidden: ["기타"], frontier: true, labels: true,
     estimated: false, selectableOnly: true, bestOnly: false, sortK: "score", sortDir: -1, selected: null, selEffort: null,
     theme: "dark", pinned: [], pinnedOnly: false,
   };
@@ -204,20 +204,28 @@
   const costUnit = () => (S.x === "costok" ? "맞힌 문제당" : "문제당");
 
   // ───────── 점수 계산
+  // 지금 고른 용도(분야). 'all' = 종합
+  const CATS = D.categories || {};
+  const curCat = () => (S.cat !== "all" && CATS[S.cat] ? S.cat : null);
+  const scoreName = () => (curCat() ? CATS[curCat()].name + " 점수" : "종합 성능 점수");
   function computeAll() {
     const models = [];
+    const cat = curCat();
     for (const m of D.models) {
       const vs = [];
       for (const v of m.variants) {
         if (S.selectableOnly && !canSelect(m, v.effort)) continue;   // 실제로 고를 수 없는 등급은 뺌
+        // 용도를 고르면 그 분야 점수 (그 분야 시험을 잰 등급만 나옴)
+        const srcs = cat ? (v.cat && v.cat[cat]) : v.src;
+        if (!srcs) continue;
         let num = 0, den = 0;
         const real = [], parts = [];
         for (const s of SRC_ORDER) {
-          const x = v.src[s];
+          const x = srcs[s];
           if (!x) continue;
           const w = 1 / x.var;
           num += x.m * w; den += w;
-          parts.push({ s, m: x.m, est: x.est, raw: x.raw, n: x.n, name: x.name });
+          parts.push({ s, m: x.m, est: x.est, raw: x.raw, n: x.n, name: x.name, asm: x.asm });
           if (!x.est) real.push(x.m);
         }
         if (!den || !real.length) continue;
@@ -533,7 +541,8 @@
     const how = howToSet(M, v.effort)[0];
     if (how) h += `<div class="tip-sep"></div><div class="tip-row"><span>설정</span><span class="${how.code ? "tip-code" : ""}">${esc(how.v)}</span></div>`;
     h += `<div class="tip-sep"></div>`;
-    for (const p of v.parts) h += `<div class="tip-row"><span>${esc(srcName(p.s))}${p.est ? " (추정)" : ""}</span><b>${p.m.toFixed(1)}</b></div>`;
+    if (curCat()) h += `<div class="tip-row"><span>${esc(CATS[curCat()].name)}</span><b>${v.score.toFixed(1)} ±${v.se.toFixed(1)}</b></div>`;
+    for (const p of v.parts) h += `<div class="tip-row"><span>${esc(srcName(p.s))}${p.est ? " (추정)" : ""}${p.asm ? " (등급 불명 → 기본 등급으로 봄)" : ""}</span><b>${p.m.toFixed(1)}</b></div>`;
     h += `<div class="tip-hint">${esc(M.company)} · ${esc(M.date || "?")} 출시 · 누르면 고정</div></div>`;
     return h;
   }
@@ -989,7 +998,7 @@
         !second ? { ok: true, t: "비교할 2위 없음" } : gapOk ? { ok: true, t: "2위와 차이가 오차보다 큼" } : { ok: false, t: `2위와 차이 ${(top.score - second.score).toFixed(1)}점 < 오차 ±${band(second).toFixed(1)}` },
       ];
       const level = !gapOk ? { k: "mid", t: "사실상 공동 1위" } : checks[0].ok ? { k: "hi", t: "1위 확실" } : { k: "mid", t: "1위 대체로 확실" };
-      cards.push({ kind: "top", label: "최고 성능", icon: ICON_TOP, sub: "성능 높은 순", tip: "그래프의 모든 점(모델 × 추론 등급) 중 종합 성능 점수가 높은 순서 — 그래프에서 위에 있는 순서와 같아요", v: top,
+      cards.push({ kind: "top", label: "최고 성능", icon: ICON_TOP, sub: (curCat() ? CATS[curCat()].short + " · " : "") + "성능 높은 순", tip: `그래프의 모든 점(모델 × 추론 등급) 중 ${scoreName()}가 높은 순서 — 그래프에서 위에 있는 순서와 같아요`, v: top,
         html: rowsHtml(topRows) + confHtml(level, checks, "1위가 2위보다 확실히 앞서는지. 두 점수 차이가 오차 범위보다 크면 확실") });
     }
     // 가성비 추천: 1위 추천이 얼마나 확실한지 (두 기관 측정? 비용 실측? 다음 후보와 가격 차이가 충분한가?)
@@ -1003,7 +1012,7 @@
       ];
       const nOk = checks.filter((c) => c.ok).length;
       const level = nOk === 3 ? { k: "hi", t: "1위 확실" } : nOk === 2 ? { k: "mid", t: "1위 대체로 확실" } : { k: "lo", t: "1위 참고용" };
-      cards.push({ kind: "value", label: "가성비 추천", icon: ICON_VALUE, sub: "성능 높은 순", tip: "1위: 최고 성능과 실력 차이가 오차 범위 안(사실상 동급)인 것 중 가장 싼 것 · 2·3위: 가성비 경계선을 따라 1위보다 싼 모델", v: cheap,
+      cards.push({ kind: "value", label: "가성비 추천", icon: ICON_VALUE, sub: (curCat() ? CATS[curCat()].short + " · " : "") + "성능 높은 순", tip: "1위: 최고 성능과 실력 차이가 오차 범위 안(사실상 동급)인 것 중 가장 싼 것 · 2·3위: 가성비 경계선을 따라 1위보다 싼 모델", v: cheap,
         html: rowsHtml(valueRows) + confHtml(level, checks, "1위 추천이 얼마나 확실한지. 확실: 세 가지 모두 충족 · 대체로 확실: 두 가지 · 참고용: 한 가지 이하") });
     }
 
@@ -1114,10 +1123,13 @@
     if (window.EFFORT_GUIDE_DATE) h += `<div class="note muted">고를 수 있는 등급·API 값·기본 등급은 6시간마다 자동 갱신 · 앱 메뉴 이름(참고)은 ${esc(window.EFFORT_GUIDE_DATE)} 기준</div>`;
     h += `</div>`;
 
-    h += `<div class="dcol"><div class="sect">기관별 점수 <b>${esc(v.eff)}</b></div>`;
+    h += `<div class="dcol"><div class="sect">${curCat() ? esc(CATS[curCat()].short) + " · " : ""}기관별 점수 <b>${esc(v.eff)}</b></div>`;
     for (const p of v.parts) {
       const pct = Math.max(2, Math.min(100, ((p.m - 130) / 45) * 100));
-      const detail = p.est ? `다른 등급(${esc(effLabel(m, p.est))}) 값에서 추정` : p.s === "epoch" ? `벤치마크 ${p.n}개로 계산` : `지능 지수 ${(+p.raw).toFixed(1)}`;
+      const cat = curCat();
+      const detail = p.est ? `다른 등급(${esc(effLabel(m, p.est))}) 값에서 추정`
+        : p.s === "epoch" ? `${cat ? "이 분야 시험" : "벤치마크"} ${p.n}개로 계산${p.asm ? ` (이 중 ${p.asm}개는 등급이 적혀 있지 않아 기본 등급으로 봄)` : ""}`
+        : cat ? `${esc(CATS[cat].aa_label || "AA 분야 지수")} ${(+p.raw).toFixed(1)}` : `지능 지수 ${(+p.raw).toFixed(1)}`;
       h += `<div class="srcbar"><span>${esc(srcName(p.s))}</span><div class="track"><div class="fill${p.est ? " est" : ""}" style="width:${pct}%"></div></div><span class="val">${p.m.toFixed(1)}</span></div><div class="srcnote">${detail}</div>`;
     }
     if (v.disagree != null) h += `<div class="note">두 기관 차이 <b>${v.disagree.toFixed(1)}점</b> — ${v.disagree > 6 ? "평가가 꽤 달라요" : v.disagree > 3 ? "약간 달라요" : "대체로 일치해요"}</div>`;
@@ -1147,6 +1159,13 @@
     th.style.transform = `translateX(${on.offsetLeft}px)`;
   }
   const syncSegs = () => $$(".seg").forEach(moveThumb);
+  // 용도(분야) 버튼: 데이터에 있는 분야로 자동 생성
+  if (Object.keys(CATS).length) {
+    $("#catSeg").innerHTML = `<button data-v="all" type="button" title="모든 분야를 합친 종합 성능">종합</button>` +
+      Object.entries(CATS).map(([k, c]) => `<button data-v="${esc(k)}" type="button" title="${esc(c.desc)}">${esc(c.short)}</button>`).join("");
+    $("#catCtl").hidden = false;
+    initSeg("catSeg", "cat", (v) => v);
+  }
   initSeg("xAxisSeg", "x", (v) => v);
   initSeg("periodSeg", "period", (v) => +v);
   initSeg("diffSeg", "difficulty", (v) => v);
@@ -1181,13 +1200,23 @@
 
   function syncControls() {
     const on = (id, v) => $$(`#${id} button`).forEach((b) => b.classList.toggle("on", b.dataset.v === String(v)));
-    on("xAxisSeg", S.x); on("periodSeg", S.period); on("diffSeg", S.difficulty);
+    on("xAxisSeg", S.x); on("periodSeg", S.period); on("diffSeg", S.difficulty); on("catSeg", curCat() || "all");
+    // 용도 설명 · 축 이름 · 표 제목
+    const cat = curCat(), note = $("#catNote");
+    $("#axisY").textContent = scoreName() + " ↑";
+    $("#scoreTh").textContent = cat ? CATS[cat].short + " 점수" : "종합 점수";
+    if (cat) {
+      const C = CATS[cat];
+      note.innerHTML = `<b>${esc(C.name)}</b> — ${esc(C.desc)}<br><span class="muted">합친 시험 ${C.tests.length}개: ${C.tests.map(esc).join(" · ")} · 측정된 등급 ${C.count}개 · 종합 점수와 같은 눈금 (오차가 ±6점 넘는 점은 제외)</span>`;
+      note.hidden = false;
+    } else note.hidden = true;
     $("#diffCtl").style.opacity = S.x === "costok" ? "1" : "0.55";
     $("#diffCtl").title = S.x === "costok" ? "" : "난이도는 '맞힌 문제당' 비용과 표의 정답률에 반영돼요";
     $("#perCoText").textContent = S.perCo ? `${S.perCo}개` : "전부";
     $$("#perCoMenu .menu-item").forEach((b) => b.classList.toggle("on", +b.dataset.v === S.perCo));
     for (const [id, prop] of Object.entries(opts)) $("#" + id).checked = !!S[prop];
     requestAnimationFrame(syncSegs);
+    setTimeout(syncSegs, 60);   // 화면 그리기 신호가 늦는 환경에서도 선택 표시가 따라가게
   }
 
   // 조절 막대가 위에 붙으면 아래 선 표시
