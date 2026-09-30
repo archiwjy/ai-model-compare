@@ -487,7 +487,7 @@
   // ═════════ 확대·이동 ═════════
   //  · 그래프를 한 번 클릭해야 '확대 모드'가 켜짐 (그전엔 휠 = 페이지 스크롤)
   //  · 확대 모드: 휠로 확대/축소, 끌어서 이동, 빈 곳 더블클릭 = 처음 화면
-  //  · 그래프 밖을 누르거나, 마우스가 그래프를 벗어나거나, Esc 를 누르면 꺼짐
+  //  · 끄는 방법은 두 가지뿐: Esc, 또는 그래프 칸 밖을 한 번 클릭 (마우스가 밖으로 나가기만 해서는 안 꺼짐)
   let FULL = null, VIEWBOX = null, viewKind = null;
   const isLog = () => S.x !== "date";
   const tx = (v) => (isLog() ? Math.log10(v) : v);
@@ -603,9 +603,48 @@
   let centerAfterUp = false;
   chartEl.addEventListener("pointerdown", (e) => {
     if (e.pointerType === "touch") return;
-    if (!zoomOn && !chartBox.classList.contains("full")) centerAfterUp = true;
+    const first = !zoomOn;
+    if (first && !chartBox.classList.contains("full")) centerAfterUp = true;
     setZoomOn(true);
+    const r = fxLayer().getBoundingClientRect();
+    ripple(e.clientX - r.left, e.clientY - r.top, first);
+    if (first) burst();
   }, true);
+
+  // 확대 모드 효과
+  //  · 켜질 때: 누른 자리에서 큰 물결 + 번쩍임, 테두리 밖으로 퍼지는 파동, 안내 표시가 튀어오름
+  //  · 켜져 있는 동안: 테두리를 따라 무지갯빛이 돌고, 누를 때마다 작은 물결
+  let fxEl = null;
+  function fxLayer() {
+    if (!fxEl) { fxEl = document.createElement("div"); fxEl.className = "zfx"; chartEl.parentElement.appendChild(fxEl); }
+    return fxEl;
+  }
+  function fxAdd(parent, cls, css) {
+    const el = document.createElement("i");
+    el.className = cls;
+    Object.assign(el.style, css || {});
+    el.addEventListener("animationend", () => el.remove(), { once: true });
+    setTimeout(() => el.remove(), 2500);   // 탭이 가려져 효과가 멈춰도 남지 않게
+    parent.appendChild(el);
+    return el;
+  }
+  function ripple(x, y, big) {
+    if (REDUCED) return;
+    const layer = fxLayer();
+    const n = big ? 3 : 2;
+    for (let i = 0; i < n; i++) fxAdd(layer, "zripple" + (big ? " big" : ""), { left: x + "px", top: y + "px", animationDelay: i * (big ? 120 : 90) + "ms" });
+    if (big) fxAdd(layer, "zflash", { left: x + "px", top: y + "px" });
+    else fxAdd(layer, "zdot", { left: x + "px", top: y + "px" });
+  }
+  function burst() {
+    if (REDUCED) return;
+    fxAdd(chartBox, "zwave");
+    chartBox.classList.remove("zoom-burst");
+    void chartBox.offsetWidth;   // 효과를 처음부터 다시 재생
+    chartBox.classList.add("zoom-burst");
+    clearTimeout(burst.t);
+    burst.t = setTimeout(() => chartBox.classList.remove("zoom-burst"), 1200);
+  }
   window.addEventListener("pointerup", () => {
     if (!centerAfterUp) return;
     centerAfterUp = false;
@@ -628,7 +667,6 @@
     if (Math.abs(delta) > 4) window.scrollBy({ top: delta, behavior: REDUCED ? "auto" : "smooth" });
   }
   document.addEventListener("pointerdown", (e) => { if (!chartBox.contains(e.target) && !chartBox.classList.contains("full")) setZoomOn(false); });
-  chartBox.addEventListener("mouseleave", () => { if (!chartBox.classList.contains("full")) setZoomOn(false); });
   // 확대 모드일 때는 그래프 칸 어디서 휠을 굴려도 페이지가 스크롤되지 않게 막는다
   chartBox.addEventListener("wheel", (e) => { if (zoomOn) e.preventDefault(); }, { passive: false });
   chartEl.addEventListener("wheel", (e) => {
