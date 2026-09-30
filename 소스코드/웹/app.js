@@ -278,29 +278,51 @@
   }
 
   // ───────── 필터
+  //  검색도 다른 설정(출시 기간 · 꺼 둔 회사 · 회사별 개수)을 똑같이 따른다
+  //  → 검색은 '이름으로 한 번 더 거르기'. 가려진 검색 결과는 그래프 위 안내 줄에서 알려 주고 바로 켤 수 있게 함
+  const outOfPeriod = (M, cutoff) => !!cutoff && (!M.date || M.date < cutoff);
   function applyFilters(all) {
     const cutoff = S.period ? monthsAgo(S.period) : null;
     const terms = searchTerms();
-    const q = terms.length > 0;
-    let list = all.filter((M) => {
-      if (q) return matchSearch(M, terms);   // 검색은 숨긴 회사·기간 밖 모델도 찾음
-      if (S.hidden.includes(groupOf(M.company))) return false;
-      if (cutoff && (!M.date || M.date < cutoff)) return false;
-      return true;
-    });
+    const found = terms.length ? all.filter((M) => matchSearch(M, terms)) : null;   // 검색에 맞는 모델 (검색 안 하면 null)
+    let list = (found || all).filter((M) => !S.hidden.includes(groupOf(M.company)) && !outOfPeriod(M, cutoff));
     list.sort((a, b) => b.best.score - a.best.score);
     const pool = list.slice();   // 가성비 경계선은 개수 제한 없이 이 전체로 계산
-    if (S.perCo && !q) {   // 회사마다 점수 높은 순으로 N개씩
+    if (S.perCo) {   // 회사마다 점수 높은 순으로 N개씩
       const cnt = {};
       list = list.filter((M) => (cnt[M.company] = (cnt[M.company] || 0) + 1) <= S.perCo);
     }
+    const base = new Set(list);   // 개수 제한까지 거친 목록 (이 밖에서 더해지는 건 고정·경계선 모델)
     for (const key of S.pinned) {   // 고정한 모델은 항상 보여줌
       if (!list.some((M) => M.key === key)) {
         const M = all.find((x) => x.key === key);
         if (M) list.push(M);
       }
     }
-    return { list, pool };
+    return { list, pool, found, cutoff, base };
+  }
+  // 검색 결과 중 몇 개가 그래프에 보이고, 나머지는 무엇 때문에 가려졌는지
+  //  보임 = 그래프에 점이 하나라도 그려진 모델. 개수 제한 밖인데 보이는 건 고정했거나 가성비 경계선 위라서 (검색 안 할 때와 같은 규칙)
+  function searchReport(found, list, points, base, cutoff) {
+    if (!found) return null;
+    const inList = new Set(list);
+    const drawn = new Set(points.filter((p) => p.x != null).map((p) => p.M));
+    const r = { found: found.length, shown: 0, pin: 0, front: 0, period: 0, cap: 0, co: 0, coGroups: [], est: 0, nocost: 0 };
+    for (const M of found) {
+      const g = groupOf(M.company);
+      if (drawn.has(M)) {
+        r.shown++;
+        if (!base.has(M)) { if (S.pinned.includes(M.key)) r.pin++; else r.front++; }
+      } else if (inList.has(M)) {
+        // 목록에는 있지만 그릴 비용이 없음: 가격표 추정 비용만 있으면 '추정 비용도 그리기'로 보이게 할 수 있음
+        if (!S.estimated && M.vs.some((v) => v.costKind === "가격 추정" && costFor(v) != null)) r.est++; else r.nocost++;
+      }
+      // 기간 밖을 먼저 셈 → '꺼 둔 회사 N개'가 회사 버튼의 숫자(그 기간의 검색 결과 수)와 같아짐
+      else if (outOfPeriod(M, cutoff)) r.period++;
+      else if (S.hidden.includes(g)) { r.co++; if (!r.coGroups.includes(g)) r.coGroups.push(g); }
+      else r.cap++;
+    }
+    return r;
   }
   function xOf(v) {
     if (isCostAxis()) {
@@ -368,7 +390,7 @@
 
   function render() {
     const all = computeAll();
-    const { list, pool } = applyFilters(all);
+    const { list, pool, found, cutoff, base } = applyFilters(all);
     const poolPts = [];
     for (const M of pool) for (const v of M.vs) poolPts.push({ M, v, x: xOf(v) });
     FR = frontierInfo(poolPts);
@@ -376,20 +398,63 @@
     const points = [];
     for (const M of list) for (const v of M.vs) points.push({ M, v, x: xOf(v) });
     VIEW = { all, list, points };
+    const SR = searchReport(found, list, points, base, cutoff);
     const empty = $("#chartEmpty");
     if (empty) {
       const none = !points.some((p) => p.x != null);
       empty.hidden = !none;
-      if (none) empty.textContent = S.search.trim() ? "검색한 모델이 없어요 · 이름 일부만 쳐도 되고, 쉼표로 여러 개를 찾을 수 있어요"
-        : "보이는 모델이 없어요 · 그래프 위 회사 버튼을 눌러 다시 켜 보세요";
+      if (none) empty.textContent = emptyText(SR, " · ");
     }
-    renderLegend(all);
+    renderSearchNote(SR);
+    renderLegend(all, found);
     renderChart(list, points);
     renderPinBar();
-    renderCards(points);
+    renderCards(points, SR);
     renderTable(list);
     renderDetail();
     syncControls();
+  }
+  // 그래프·카드에 보일 모델이 하나도 없을 때의 안내
+  function emptyText(SR, sep) {
+    if (!SR) return "보이는 모델이 없어요" + sep + "그래프 위 회사 버튼을 눌러 다시 켜 보세요";
+    if (!SR.found) return "검색한 모델이 없어요" + sep + "이름 일부만 쳐도 되고, 쉼표로 여러 개를 찾을 수 있어요";
+    if (SR.co + SR.period + SR.cap) return `찾은 모델 ${SR.found}개가 지금 설정에 가려져 있어요` + sep + "그래프 위 안내 줄의 버튼으로 바로 보이게 할 수 있어요";
+    if (SR.est) return "찾은 모델은 가격표로 짐작한 비용만 있어요" + sep + "그래프 위 안내 줄의 '추정 비용 켜기'를 누르면 보여요";
+    return "찾은 모델은 비용 기록이 없어 그래프에 그릴 수 없어요" + sep + "아래 순위표에서 점수를 볼 수 있어요";
+  }
+  // 검색 안내 줄: 찾은 모델 중 몇 개가 보이고, 나머지는 어떤 설정 때문에 가려졌는지 + 바로 켜는 버튼
+  const PERIOD_KO = { 3: "3개월", 6: "6개월", 12: "1년" };
+  function renderSearchNote(SR) {
+    const el = $("#searchNote");
+    if (!el) return;
+    if (!SR || !SR.found) { el.hidden = true; el.innerHTML = ""; return; }
+    el.hidden = false;
+    const hid = SR.found - SR.shown;
+    const plus = [];   // 개수 제한 밖인데 함께 보이는 것 (검색 안 할 때와 같은 규칙)
+    if (SR.front) plus.push(`가성비 경계선 위 ${SR.front}개`);
+    if (SR.pin) plus.push(`고정한 ${SR.pin}개`);
+    let h = `<span class="sn-main"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>`
+      + (hid ? `찾은 모델 <b>${SR.found}</b>개 중 <b>${SR.shown}</b>개 보임` : `찾은 모델 <b>${SR.found}</b>개 모두 보임`)
+      + (plus.length && S.perCo ? ` <small class="sn-plus" title="가성비 경계선 위 모델과 고정한 모델은 회사별 개수 제한과 상관없이 늘 보여요 (검색하지 않을 때와 같은 규칙)">(회사마다 ${S.perCo}개 + ${plus.join(" + ")})</small>` : "") + `</span></span>`;
+    const r = [];
+    const reason = (txt, n, k, btn) => `<span class="sn-r"><span>${txt} <b>${n}</b>개</span>${k ? `<button type="button" data-sn="${k}">${btn}</button>` : ""}</span>`;
+    if (SR.co) r.push(reason(`꺼 둔 회사(${SR.coGroups.map(esc).join(", ")})`, SR.co, "co", "켜기"));
+    if (SR.period) r.push(reason(`출시 ${PERIOD_KO[S.period] || S.period + "개월"} 밖`, SR.period, "period", "전체 기간"));
+    if (SR.cap) r.push(reason(`회사마다 ${S.perCo}개까지라`, SR.cap, "cap", "전부 보기"));
+    if (SR.est) r.push(reason("가격표로 짐작한 비용뿐이라", SR.est, "est", "추정 비용 켜기"));
+    if (SR.nocost) r.push(reason("비용 기록이 없어 (순위표에만)", SR.nocost));
+    if (r.length) h += `<span class="sn-why">가려짐</span>` + r.join("");
+    el.innerHTML = h;
+    el.querySelectorAll("button[data-sn]").forEach((b) => {
+      b.onclick = () => {
+        const k = b.dataset.sn;
+        if (k === "co") S.hidden = S.hidden.filter((g) => !SR.coGroups.includes(g));
+        if (k === "period") S.period = 0;
+        if (k === "cap") S.perCo = 0;
+        if (k === "est") S.estimated = true;
+        save(); render();
+      };
+    });
   }
 
   // ───────── 그래프 그리기
@@ -1026,10 +1091,11 @@
     }[sym];
     return `<svg viewBox="0 0 12 12" style="fill:${col}">${s}</svg>`;
   }
-  function renderLegend(all) {
+  function renderLegend(all, found) {
+    // 숫자 = 그 기간의 모델 수 (검색 중이면 검색에 맞는 모델 수 → 꺼 둔 회사에 결과가 있는지 바로 보임)
     const cnt = {};
     const cutoff = S.period ? monthsAgo(S.period) : null;
-    for (const M of all) if (!cutoff || (M.date && M.date >= cutoff)) cnt[groupOf(M.company)] = (cnt[groupOf(M.company)] || 0) + 1;
+    for (const M of found || all) if (!outOfPeriod(M, cutoff)) cnt[groupOf(M.company)] = (cnt[groupOf(M.company)] || 0) + 1;
     const el = $("#legend");
     el.innerHTML = "";
     for (const g of [...MAIN_COMPANIES, "기타"]) {
@@ -1037,7 +1103,9 @@
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = "chip" + (S.hidden.includes(g) ? " off" : "");
-      chip.title = (g === "기타" ? "상위 " + TOP_N + "곳 밖의 모든 회사" + NL : "") + COMPANY_RULE + NL + (S.hidden.includes(g) ? "눌러서 보이기" : "눌러서 숨기기");
+      chip.title = (g === "기타" ? "상위 " + TOP_N + "곳 밖의 모든 회사" + NL : "") + COMPANY_RULE + NL
+        + (found ? "숫자 = 검색에 맞는 모델 수" + NL : "") + (S.hidden.includes(g) ? "눌러서 보이기" : "눌러서 숨기기");
+      if (found && S.hidden.includes(g) && cnt[g]) chip.classList.add("has-hit");   // 꺼 둔 회사에 검색 결과가 있으면 숫자를 눈에 띄게
       chip.innerHTML = symbolSvg(st.sym, css(st.c));
       const t = document.createElement("span"); t.textContent = g;
       const n = document.createElement("span"); n.className = "cnt"; n.textContent = cnt[g] || 0;
@@ -1063,14 +1131,14 @@
   // ───────── 첫 화면 추천 카드 (최고 성능 / 가성비 추천)
   const ICON_TOP = `<svg viewBox="0 0 24 24"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4ZM17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>`;
   const ICON_VALUE = `<svg viewBox="0 0 24 24"><path d="M12 2v20M17 6.5C17 4.6 14.8 3.5 12 3.5S7 4.6 7 6.5 9 9.2 12 10s5 2 5 4-2.2 3.5-5 3.5-5-1.1-5-3"/></svg>`;
-  function renderCards(points) {
+  function renderCards(points, SR) {
     const el = $("#cards");
     // 그래프에 실제로 그려진 점만 (비용이 없어 그래프에 없는 점은 카드에도 넣지 않음 → 그래프 순서와 똑같이)
     const all = points.filter((p) => p.x != null).map((p) => p.v);
     // 그래프와 같은 기준: 가격표로 짐작한 비용은 빼고 (추정 비용 그리기를 켜면 포함), 등급 환산은 포함하되 확실성 표시에서 알려 줌
     const withCost = points.filter((p) => costFor(p.v) != null && (S.estimated || p.v.costKind !== "가격 추정")).map((p) => p.v);
     if (!all.length) {
-      el.innerHTML = `<div class="pick pick-empty">${S.search.trim() ? "검색한 모델이 없어요. 이름 일부만 쳐도 되고, 쉼표로 여러 개를 찾을 수 있어요." : "보이는 모델이 없어요. 그래프 위 회사 버튼을 눌러 다시 켜 보세요."}</div>`;
+      el.innerHTML = `<div class="pick pick-empty">${esc(emptyText(SR, ". "))}.</div>`;
       return;
     }
     if (el.querySelector(".pick-empty")) el.innerHTML = "";

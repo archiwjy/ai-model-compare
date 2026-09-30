@@ -702,3 +702,33 @@ table#table { width: 100%; border-collapse: collapse; font-size: 14px; min-width
 }
 @media (max-width: 700px) { .pick-conf .lv-x { display: none; } }   /* 휴대폰: '사실상 공동 1위'만 짧게 */
 :root[data-theme="light"] .vt-row.first .rk, :root[data-theme="light"] .pick[data-kind="top"] .vt-row.first .rk { color: #fff; }   /* 밝은 화면: 진한 배경 위 1위 숫자를 흰색으로 */
+/* 검색 안내 줄: 찾은 모델 중 몇 개가 보이고, 나머지는 어떤 설정 때문에 가려졌는지 + 바로 켜는 버튼 */
+.search-note { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 2px 4px 6px; padding: 7px 10px; border-radius: 12px;
+  background: var(--surface-2); border: 1px solid var(--line-2); font-size: 12.5px; color: var(--text-2); line-height: 1.35; animation: pop .2s var(--ease) both; }
+.search-note[hidden] { display: none; }
+.search-note b { color: var(--text); font-weight: 750; font-variant-numeric: tabular-nums; }
+.search-note .sn-main { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.search-note .sn-main svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; flex: none; }
+.search-note .sn-plus { color: var(--muted); font-size: 11.5px; font-weight: 500; }
+.search-note .sn-why { color: var(--muted); padding-left: 10px; border-left: 1px solid var(--line-2); }
+.search-note .sn-r { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.search-note .sn-r button { height: 24px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--ink); background: var(--ink); color: var(--ink-text);
+  font-size: 11.5px; font-weight: 700; cursor: pointer; transition: transform .15s var(--ease), opacity .15s; }
+.search-note .sn-r button:hover { opacity: .85; }
+.search-note .sn-r button:active { transform: scale(.95); }
+.search-note .sn-r button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+/* 꺼 둔 회사에 검색 결과가 있으면: 조금 덜 흐리게 + 숫자 강조 */
+.chip.off.has-hit { opacity: .7; border-style: dashed; }
+.chip.off.has-hit .cnt { color: var(--warn); font-weight: 800; }
+@media (max-width: 700px) {
+  .search-note { margin: 0 0 6px; padding: 8px 10px; font-size: 12px; }
+  .search-note .sn-why { display: none; }
+  .search-note .sn-r { white-space: normal; }
+  .search-note .sn-r button { height: 30px; padding: 0 12px; font-size: 12px; }
+  .search-note:not([hidden]) + .pinbar .hint { display: none; }   /* 검색 중엔 '점을 누르면…' 안내를 줄여 그래프 자리 확보 */
+  .search-note:not([hidden]) + .pinbar:empty, .search-note:not([hidden]) + .pinbar:has(> .hint:only-child) { min-height: 0; padding: 0; }
+}
+@media (max-height: 500px) {
+  .chart-box.full .search-note { margin: 0 2px 2px; padding: 3px 8px; font-size: 11px; }
+  .chart-box.full .search-note .sn-r button { height: 22px; }
+}

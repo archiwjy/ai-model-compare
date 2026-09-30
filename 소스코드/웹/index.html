@@ -79,7 +79,7 @@
       <div class="ctl">
         <span class="ctl-label">회사별</span>
         <div class="menu" id="perCoMenu">
-          <button class="menu-btn" type="button" aria-haspopup="listbox" aria-label="회사마다 보여 줄 모델 개수" title="회사마다 점수 높은 순으로 몇 개씩 보여 줄지"><span id="perCoText">3개</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+          <button class="menu-btn" type="button" aria-haspopup="listbox" aria-label="회사마다 보여 줄 모델 개수" title="회사마다 점수 높은 순으로 몇 개씩 보여 줄지 (검색 결과에도 똑같이 적용 · 가성비 경계선 위 모델과 고정한 모델은 개수와 상관없이 함께 보여요)"><span id="perCoText">3개</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
           <div class="menu-pop" role="listbox"></div>
         </div>
       </div>
@@ -118,6 +118,7 @@
         </button>
       </div>
     </div>
+    <div class="search-note" id="searchNote" role="status" hidden></div>
     <div class="pinbar" id="pinBar"></div>
     <div class="chart-wrap">
       <div class="axis-y" id="axisY">종합 성능 점수 ↑</div>
