@@ -915,17 +915,39 @@
     const withCost = points.filter((p) => costFor(p.v) != null && (S.estimated || p.v.costKind === "측정")).map((p) => p.v);
     if (!all.length) { el.innerHTML = ""; return; }
     const top = all.reduce((a, b) => (b.score > a.score ? b : a));
-    const tol = Math.max(3, top.se);
-    const near = withCost.filter((v) => v.score >= top.score - tol);
-    const cheap = near.length ? near.reduce((a, b) => (costFor(b) < costFor(a) ? b : a)) : null;
     const cards = [{ kind: "top", label: "최고 성능", icon: ICON_TOP, sub: "지금 보이는 모델 중 1등", v: top }];
+    // 가성비 추천: "1등과 실력 차이가 오차 범위 안인 것" 중 가장 싼 것
+    //  · 고정된 몇 점이 아니라, 1등과 후보 각자의 점수 오차를 합친 범위로 비교 (√(오차₁²+오차₂²))
+    //    → 두 기관이 모두 잰 모델끼리는 엄격하게, 한 기관만 잰 모델은 너그럽게 (그래프의 오차 띠와 같은 원리)
+    //  · 비용은 실제로 잰 값만 (추정 비용 그리기를 켜면 추정도 포함)
+    const band = (v) => Math.sqrt(top.se ** 2 + v.se ** 2);
+    const near = withCost.filter((v) => top.score - v.score <= band(v)).sort((a, b) => costFor(a) - costFor(b));
+    const cheap = near[0] || null;
     if (cheap) {
       const ratio = costFor(top) && costFor(cheap) ? costFor(top) / costFor(cheap) : null;
       const gap = top.score - cheap.score;
-      cards.push({
-        kind: "value", label: "가성비 추천", icon: ICON_VALUE, sub: `최고와 ${tol.toFixed(1)}점 이내 중 가장 쌈`, v: cheap,
-        note: cheap === top ? "최고 성능 모델이 가장 싸기도 해요" : `최고보다 <b>${gap.toFixed(1)}점</b> 낮고 <span class="up">${ratio ? ratio.toFixed(1) + "배 저렴" : ""}</span>`,
-      });
+      // 추천이 얼마나 확실한지: 두 기관 측정? 비용 실측? 다음 후보와 가격 차이가 충분한가?
+      // 다음으로 싼 후보 (가격 차이가 충분한지 확인용)
+      const next = near[1] || null;
+      const nextRatio = next ? costFor(next) / costFor(cheap) : null;
+      // 대안: 돈을 조금 더 내면 점수가 더 오르는 후보 (최고 성능 카드와 같은 것은 빼고, 더 비싼데 점수도 낮은 것은 의미 없어서 뺌)
+      const alt = near.slice(1).find((v) => v !== top && v.score > cheap.score) || null;
+      const altRatio = alt ? costFor(alt) / costFor(cheap) : null;
+      const checks = [
+        cheap.nReal >= 2 ? { ok: true, t: "두 기관 모두 측정" } : { ok: false, t: "한 기관만 측정" },
+        cheap.costKind === "측정" ? { ok: true, t: "비용 실측" } : { ok: false, t: "비용 추정" },
+        !next ? { ok: true, t: "비슷한 후보 없음" } : nextRatio >= 1.25 ? { ok: true, t: `다음 후보보다 ${nextRatio.toFixed(1)}배 쌈` } : { ok: false, t: `비슷한 값의 후보 있음` },
+      ];
+      const nOk = checks.filter((c) => c.ok).length;
+      const level = nOk === 3 ? { k: "hi", t: "확실" } : nOk === 2 ? { k: "mid", t: "대체로 확실" } : { k: "lo", t: "참고용" };
+      let note = cheap === top ? "최고 성능 모델이 가장 싸기도 해요" : `최고보다 <b>${gap.toFixed(1)}점</b> 낮고 <span class="up">${ratio ? ratio.toFixed(1) + "배 저렴" : ""}</span> <span class="muted">(오차 범위 ±${band(cheap).toFixed(1)} 안)</span>`;
+      let extra = `<div class="pick-conf ${level.k}" title="확실: 세 가지 모두 충족 · 대체로 확실: 두 가지 · 참고용: 한 가지 이하"><span class="lv">${level.t}</span>` +
+        checks.map((c) => `<span class="ck ${c.ok ? "ok" : "no"}">${c.ok ? "✓" : "!"} ${esc(c.t)}</span>`).join("") + `</div>`;
+      if (alt) {
+        const d = alt.score - cheap.score;
+        extra += `<div class="pick-alt">대안: <b>${esc(alt.m.name)}</b> <span class="eff-chip sm">${esc(alt.eff)}</span> ${fmtCost(costFor(alt))} · ${altRatio.toFixed(1)}배 비싸고 +${d.toFixed(1)}점</div>`;
+      }
+      cards.push({ kind: "value", label: "가성비 추천", icon: ICON_VALUE, sub: "최고와 오차 범위 안에서 가장 쌈", v: cheap, note, extra });
     }
     // 같은 자리 카드는 다시 만들지 않고 내용만 바꿔서 숫자가 부드럽게 변하게
     cards.forEach((c, i) => {
@@ -938,7 +960,7 @@
         `<div class="pick-name"><span class="dot" style="background:${col}"></span><span class="nm">${esc(v.m.name)}</span><span class="eff-chip">${esc(v.eff)}</span></div>` +
         `<div class="pick-stats"><div class="stat"><div class="v"><span data-n="score">${v.score.toFixed(1)}</span><small>점</small></div><div class="k">종합 성능</div></div>` +
         `<div class="stat"><div class="v">${fmtCost(costFor(v))}</div><div class="k">${costUnit()} 비용</div></div></div>` +
-        (c.note ? `<div class="pick-note">${c.note}</div>` : "");
+        (c.note ? `<div class="pick-note">${c.note}</div>` : "") + (c.extra || "");
       countUp(card.querySelector('[data-n="score"]'), v.score, 1);
       card.onclick = () => pinAndShow(v.m.key, v.effort);
     });
