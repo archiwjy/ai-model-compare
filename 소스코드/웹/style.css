@@ -498,3 +498,13 @@ table#table { width: 100%; border-collapse: collapse; font-size: 14px; min-width
 .foot .src b { color: var(--text-2); font-weight: 650; }
 .foot a { color: var(--text-2); text-underline-offset: 3px; }
 .foot .fine { flex-basis: 100%; font-size: 11.5px; }
+
+/* 가성비 경계선 표시 */
+.badge.fr { background: var(--ink); color: var(--ink-text); }
+.badge.nr { background: transparent; color: var(--text-2); border: 1px dashed var(--line-3); }
+.tip-front { margin: 2px 0 6px; padding: 5px 8px; border-radius: 8px; font-size: 12px; background: var(--surface-3); color: var(--text-2); }
+.tip-front b { color: var(--text); }
+.tip-front.front { background: var(--ink); color: var(--ink-text); }
+.tip-front.front b { color: var(--ink-text); }
+.k-band { width: 18px; height: 9px; border-radius: 2px; background: color-mix(in srgb, var(--frontier) 14%, transparent); border-top: 2px dashed var(--frontier); }
+.k-near { width: 10px; height: 10px; border-radius: 50%; border: 1.5px dashed var(--frontier); }

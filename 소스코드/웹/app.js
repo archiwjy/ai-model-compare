@@ -200,6 +200,7 @@
       return true;
     });
     list.sort((a, b) => b.best.score - a.best.score);
+    const pool = list.slice();   // 가성비 경계선은 개수 제한 없이 이 전체로 계산
     if (S.perCo && !q) {   // 회사마다 점수 높은 순으로 N개씩
       const cnt = {};
       list = list.filter((M) => (cnt[M.company] = (cnt[M.company] || 0) + 1) <= S.perCo);
@@ -210,7 +211,7 @@
         if (M) list.push(M);
       }
     }
-    return list;
+    return { list, pool };
   }
   function xOf(v) {
     if (isCostAxis()) {
@@ -223,13 +224,35 @@
     if (S.x === "date") return v.m.date ? v.m.date : null;
     return null;
   }
-  // 가성비 경계선: 비용이 낮은 순으로 보면서 지금까지 최고 점수를 넘는 점만
-  function frontierOf(points) {
-    const pts = points.filter((p) => p.x != null && S.x !== "date").sort((a, b) => a.x - b.x || b.v.score - a.v.score);
-    const out = [];
+  // ───────── 가성비 경계선 (효율적 경계선)
+  // 규칙: "나보다 싸면서 나보다 똑똑한 모델이 하나도 없으면 경계선 위"
+  //  · 화면의 '회사별 개수' 제한과 상관없이 그 기간의 모든 모델로 계산 (숨은 가성비 모델도 찾음)
+  //  · 가격표로 추정한 비용(실측 없음)은 믿기 어려워 계산에서 뺌
+  //  · 점수 오차(±)가 있으므로, 경계선 아래 '오차 범위' 안의 점은 '사실상 동급'으로 따로 표시
+  // 그래프 도구가 데이터를 복사해 쓰므로, 점은 '모델 키 + 등급' 이름표로 찾는다
+  const vkey = (v) => v.m.key + "|" + v.effort;
+  function frontierInfo(poolPts) {
+    const none = { front: [], status: new Map(), k: 0, levelAt: () => -Infinity };
+    if (!S.frontier || S.x === "date") return none;
+    const ok = poolPts.filter((p) => p.x != null && !(isCostAxis() && p.v.costKind === "가격 추정"));
+    if (ok.length < 2) return none;
+    const sorted = ok.slice().sort((a, b) => a.x - b.x || b.v.score - a.v.score);
+    const front = [];
     let best = -Infinity;
-    for (const p of pts) if (p.v.score > best + 1e-9) { out.push(p); best = p.v.score; }
-    return out;
+    for (const p of sorted) if (p.v.score > best + 1e-9) { front.push(p); best = p.v.score; }
+    // 그 비용까지 쓸 때 얻을 수 있는 최고 점수 (계단 모양)
+    const levelAt = (x) => { let lv = -Infinity; for (const f of front) { if (f.x <= x * (1 + 1e-9)) lv = f.v.score; else break; } return lv; };
+    // 오차 범위: 두 점수를 비교할 때의 보통 오차 (√2 × 점수 오차 중앙값)
+    const ses = ok.map((p) => p.v.se).sort((a, b) => a - b);
+    const k = Math.round(Math.SQRT2 * ses[Math.floor(ses.length / 2)] * 10) / 10;
+    const status = new Map();
+    for (const f of front) status.set(vkey(f.v), { st: "front", gap: 0 });
+    for (const p of ok) {
+      if (status.has(vkey(p.v))) continue;
+      const gap = levelAt(p.x) - p.v.score;
+      status.set(vkey(p.v), { st: gap <= k ? "near" : "below", gap });
+    }
+    return { front, status, k, levelAt };
   }
 
   // ───────── 그래프 준비
@@ -238,6 +261,7 @@
   const chart = echarts.init(chartEl, null, { renderer: "canvas" });
   const isNarrow = () => chartEl.clientWidth < 560;
   let renderedNarrow = null, resizeTimer = null, VIEW = null;
+  let FR = { front: [], status: new Map(), k: 0, levelAt: () => -Infinity };
   function onChartResize() {
     chart.resize();
     clearTimeout(resizeTimer);
@@ -252,7 +276,11 @@
 
   function render() {
     const all = computeAll();
-    const list = applyFilters(all);
+    const { list, pool } = applyFilters(all);
+    const poolPts = [];
+    for (const M of pool) for (const v of M.vs) poolPts.push({ M, v, x: xOf(v) });
+    FR = frontierInfo(poolPts);
+    for (const p of FR.front) if (!list.includes(p.M)) list.push(p.M);   // 경계선 위 모델은 개수 제한에 걸려도 보여줌
     const points = [];
     for (const M of list) for (const v of M.vs) points.push({ M, v, x: xOf(v) });
     VIEW = { all, list, points };
@@ -305,9 +333,7 @@
     };
     const sidePos = (x) => (nearRight(x) ? "left" : narrow ? "top" : "right");
 
-    // 가성비 경계선 위의 점 (조금 크게, 테두리 강조)
-    const front = S.frontier && S.x !== "date" ? frontierOf(points) : [];
-    const onFront = new Set(front.map((p) => p.v));
+    const front = FR.front;
 
     const labelled = new Set(list.slice(0, S.labels ? 40 : 0).map((M) => M.key));
     const pinSet = new Set(S.pinned);
@@ -324,15 +350,19 @@
         const x = xOf(v);
         const hollow = isCostAxis() && v.costKind === "가격 추정";
         const isTop = v === topV;
-        const fr = onFront.has(v);
+        const st = (FR.status.get(vkey(v)) || {}).st;
+        const fr = st === "front", nr = st === "near";
         const base = sym === "pin" ? 16 : sym === "triangle" ? 12 : 10;
         return {
           value: [x, +v.score.toFixed(2)],
           v,
           symbol: sym,
-          symbolSize: base + (pinned ? 3 : 0) + (fr ? 3 : 0),
+          symbolSize: base + (pinned ? 3 : 0) + (fr ? 3 : nr ? 2 : 0),
           itemStyle: Object.assign(
-            hollow ? { color: surf, borderColor: col, borderWidth: 2 } : { color: col, borderColor: fr ? ink : surf, borderWidth: fr ? 2 : 1.5 },
+            hollow ? { color: surf, borderColor: col, borderWidth: 2 }
+              : fr ? { color: col, borderColor: ink, borderWidth: 2 }
+              : nr ? { color: col, borderColor: ink, borderWidth: 1.4, borderType: [2, 2] }
+              : { color: col, borderColor: surf, borderWidth: 1.5 },
             { opacity: dim ? 0.16 : 1 }),
           label: pinned ? {
             show: true, position: sidePos(x), distance: 7,
@@ -364,16 +394,24 @@
         animationDuration: 550, animationEasing: "cubicOut",
       });
     }
-    // 가성비 경계선: 흑백 점선 + 은은한 빛 + 아래쪽 옅은 음영
+    // 가성비 경계선: 흑백 점선 + 은은한 빛, 아래에 '오차 범위' 띠
     if (front.length >= 2) {
+      const pts = front.map((p) => [p.x, +p.v.score.toFixed(2)]);
+      pts.push([V.x1 * 1.5, pts[pts.length - 1][1]]);   // 가장 비싼 경계 점 오른쪽으로도 수평 연장
+      const k = FR.k;
+      series.push({
+        id: "__fband_lo", type: "line", step: "end", silent: true, z: 1, stack: "fband", symbol: "none",
+        data: pts.map(([x, y]) => [x, y - k]), lineStyle: { opacity: 0 }, tooltip: { show: false }, emphasis: { disabled: true }, animation: false,
+      });
+      series.push({
+        id: "__fband", type: "line", step: "end", silent: true, z: 1, stack: "fband", symbol: "none",
+        data: pts.map(([x]) => [x, k]), lineStyle: { opacity: 0 }, areaStyle: { color: ink, opacity: 0.1 },
+        tooltip: { show: false }, emphasis: { disabled: true }, animation: false,
+      });
       series.push({
         id: "__frontier", name: "가성비 경계선", type: "line", step: "end", silent: true, z: 2,
-        data: front.map((p) => [p.x, +p.v.score.toFixed(2)]), showSymbol: false,
+        data: pts, showSymbol: false,
         lineStyle: { type: [6, 5], width: 2, color: ink, opacity: 0.9, shadowBlur: 10, shadowColor: ink + "55" },
-        areaStyle: {
-          origin: "start",
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: ink + "14" }, { offset: 1, color: ink + "00" }]),
-        },
         tooltip: { show: false }, emphasis: { disabled: true },
         animationDuration: 900, animationEasing: "cubicInOut",
       });
@@ -431,6 +469,13 @@
     h += `<div class="tip-row"><span>문제당 비용</span><b>${fmtCost(v.cost)}${v.costKind && v.costKind !== "측정" ? ` <span class="muted">(${esc(v.costKind)})</span>` : ""}</b></div>`;
     if (v.costOk != null) h += `<div class="tip-row"><span>맞힌 문제당 <span class="muted">(${esc(diff().label)} ${Math.round(v.acc * 100)}%)</span></span><b>${fmtCost(v.costOk)}</b></div>`;
     if (M.price) h += `<div class="tip-row"><span>가격표 (입력/출력)</span><span>$${M.price.in} / $${M.price.out}</span></div>`;
+    const fs = FR.status.get(vkey(v));
+    if (fs) {
+      const t = fs.st === "front" ? `<b>경계선 위</b> — 이 가격대에서 최선`
+        : fs.st === "near" ? `<b>사실상 동급</b> — 경계선보다 ${fs.gap.toFixed(1)}점 낮지만 오차(±${FR.k}) 안`
+        : `경계선보다 ${fs.gap.toFixed(1)}점 낮음 — 같은 돈이면 더 좋은 모델이 있음`;
+      h += `<div class="tip-front ${fs.st}">${t}</div>`;
+    }
     const how = howToSet(M, v.effort)[0];
     if (how) h += `<div class="tip-sep"></div><div class="tip-row"><span>설정</span><span class="${how.code ? "tip-code" : ""}">${esc(how.v)}</span></div>`;
     h += `<div class="tip-sep"></div>`;
@@ -855,7 +900,7 @@
         `<td class="num"><span class="scorec"><span class="bar"><i style="width:${Math.max(4, pct).toFixed(0)}%"></i></span><b>${v.score.toFixed(1)}</b></span><span class="sub2">±${v.se.toFixed(1)} · 신뢰도 <span class="badge ${c.k}">${c.t}</span></span></td>` +
         `<td class="num">${fmtCost(v.cost)}${v.costKind && v.costKind !== "측정" ? `<span class="sub2">${esc(v.costKind === "가격 추정" ? "가격표로 추정" : "등급 환산")}</span>` : ""}</td>` +
         `<td class="num">${fmtCost(v.costOk)}${v.acc ? `<span class="sub2">정답률 ${Math.round(v.acc * 100)}%</span>` : ""}</td>` +
-        `<td class="num">${v.value ?? "—"}</td>` +
+        `<td class="num">${(() => { const f = FR.status.get(vkey(v)); return f && f.st === "front" ? '<span class="badge fr">경계선</span> ' : f && f.st === "near" ? '<span class="badge nr">동급</span> ' : ""; })()}${v.value ?? "—"}</td>` +
         `<td class="num">${v.m.price ? `${fmtPrice(v.m.price.in)} / ${fmtPrice(v.m.price.out)}` : "—"}</td>` +
         `<td>${esc(v.m.date || "—")}</td>`;
       tr.onclick = () => togglePin(v.m.key, v.effort);
