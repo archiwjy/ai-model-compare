@@ -9,19 +9,42 @@
     return;
   }
 
-  // ───────── 회사별 색·모양 (색은 회사를 따라감. 순위·필터로 바뀌지 않음)
-  const COMPANY_STYLE = {
-    Google: { c: "--c1", sym: "circle" },
-    Anthropic: { c: "--c2", sym: "rect" },
-    OpenAI: { c: "--c3", sym: "diamond" },
-    xAI: { c: "--c4", sym: "triangle" },
-    DeepSeek: { c: "--c7", sym: "pin" },
-    Alibaba: { c: "--c6", sym: "roundRect" },
-    Zhipu: { c: "--c5", sym: "circle" },
-    Moonshot: { c: "--c8", sym: "rect" },
-  };
+  // ───────── 회사별 색·모양
+  //  · 색을 받는 회사는 사람이 정하지 않고, 데이터가 갱신될 때마다 자동으로 고름 (pickCompanies)
+  //    규칙: 최근 6개월에 나온 모델 중 '가장 높은 종합 점수'가 높은 회사 순으로 상위 5곳
+  //  · 나머지 회사는 전부 회색 '기타'
+  //  · 한 번 받은 색은 그 회사가 상위 5곳에 남아 있는 동안 그대로 유지 (순위가 바뀌어도 색이 뒤섞이지 않게)
+  const TOP_N = 5, RECENT_MONTHS = 6;
+  const SLOTS = [
+    { c: "--c1", sym: "circle" }, { c: "--c2", sym: "rect" }, { c: "--c3", sym: "diamond" },
+    { c: "--c7", sym: "triangle" }, { c: "--c4", sym: "pin" },
+  ];
+  let COMPANY_STYLE = {};
   const OTHER = { c: "--c0", sym: "circle" };
-  const MAIN_COMPANIES = Object.keys(COMPANY_STYLE);
+  let MAIN_COMPANIES = [];
+  let COMPANY_RULE = "";
+  const NL = String.fromCharCode(10);   // 말풍선 줄바꿈
+  function pickCompanies(all) {
+    const bestOf = (list) => {
+      const b = {};
+      for (const M of list) if (M.company && M.company !== "기타" && !(b[M.company] >= M.best.score)) b[M.company] = M.best.score;
+      return Object.entries(b).sort((x, y) => y[1] - x[1]).map(([co]) => co);
+    };
+    const cutoff = monthsAgo(RECENT_MONTHS);
+    let top = bestOf(all.filter((M) => M.date && M.date >= cutoff)).slice(0, TOP_N);
+    for (const co of bestOf(all)) if (top.length < TOP_N && !top.includes(co)) top.push(co);   // 최근 모델이 적으면 전체 기간으로 채움
+    // 색 자리: 지난번에 받은 자리를 기억해 두었다가 그대로 줌
+    let prev = {};
+    try { prev = JSON.parse(localStorage.getItem("aiCompare.coSlots") || "{}"); } catch (e) { /* 없어도 됨 */ }
+    const slot = {}, used = new Set();
+    for (const co of top) if (prev[co] != null && prev[co] < SLOTS.length && !used.has(prev[co])) { slot[co] = prev[co]; used.add(prev[co]); }
+    for (const co of top) if (slot[co] == null) { const i = SLOTS.findIndex((_, k) => !used.has(k)); slot[co] = i; used.add(i); }
+    try { localStorage.setItem("aiCompare.coSlots", JSON.stringify(slot)); } catch (e) { /* 저장 안 돼도 동작 */ }
+    COMPANY_STYLE = {};
+    for (const co of top) COMPANY_STYLE[co] = SLOTS[slot[co]];
+    MAIN_COMPANIES = top;
+    COMPANY_RULE = `최근 ${RECENT_MONTHS}개월 모델의 최고 점수가 높은 회사 ${TOP_N}곳 (데이터가 바뀌면 자동으로 다시 고름)`;
+  }
   const styleOf = (co) => COMPANY_STYLE[co] || OTHER;
   const groupOf = (co) => (COMPANY_STYLE[co] ? co : "기타");
 
@@ -860,7 +883,7 @@
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = "chip" + (S.hidden.includes(g) ? " off" : "");
-      chip.title = S.hidden.includes(g) ? "눌러서 보이기" : "눌러서 숨기기";
+      chip.title = (g === "기타" ? "상위 " + TOP_N + "곳 밖의 모든 회사" + NL : "") + COMPANY_RULE + NL + (S.hidden.includes(g) ? "눌러서 보이기" : "눌러서 숨기기");
       chip.innerHTML = symbolSvg(st.sym, css(st.c));
       const t = document.createElement("span"); t.textContent = g;
       const n = document.createElement("span"); n.className = "cnt"; n.textContent = cnt[g] || 0;
@@ -1246,6 +1269,7 @@
     }, 3600000);
   });
 
+  pickCompanies(computeAll());
   render();
   fitChartHeight();
   // 글꼴이 늦게 들어오면 알약 버튼 폭이 바뀌므로 한 번 더 맞춤
