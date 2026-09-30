@@ -553,7 +553,35 @@
     toastTimer = setTimeout(hideToast, 1600);
   }
   function hideToast() { $("#zoomToast").classList.remove("show"); }
-  chartEl.addEventListener("pointerdown", (e) => { if (e.pointerType !== "touch") setZoomOn(true); }, true);
+  // 그래프를 눌러 확대 모드를 켜면, 손을 뗀 뒤 그래프가 화면 가운데 오도록 페이지를 부드럽게 옮긴다
+  // (누르는 도중에 움직이면 다른 점이 눌릴 수 있어서 손을 뗀 다음에 옮김)
+  let centerAfterUp = false;
+  chartEl.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch") return;
+    if (!zoomOn && !chartBox.classList.contains("full")) centerAfterUp = true;
+    setZoomOn(true);
+  }, true);
+  window.addEventListener("pointerup", () => {
+    if (!centerAfterUp) return;
+    centerAfterUp = false;
+    setTimeout(centerChart, 0);
+  });
+  // PC: 그래프 칸 전체가 (위에 붙은 막대들 아래) 한 화면에 딱 들어가도록 그래프 높이를 맞춤
+  function fitChartHeight() {
+    if (window.innerWidth <= 700 || chartBox.classList.contains("full")) { chartEl.style.height = ""; return; }
+    const extra = chartBox.offsetHeight - chartEl.offsetHeight;
+    const top0 = $(".topbar").offsetHeight + dock.offsetHeight;
+    const h = Math.max(440, Math.min(900, window.innerHeight - top0 - extra - 16));
+    if (Math.abs(chartEl.offsetHeight - h) > 2) chartEl.style.height = h + "px";
+  }
+  window.addEventListener("resize", () => { clearTimeout(fitChartHeight.t); fitChartHeight.t = setTimeout(fitChartHeight, 120); });
+  function centerChart() {
+    const r = chartBox.getBoundingClientRect();
+    const top0 = $(".topbar").offsetHeight + dock.offsetHeight;   // 위에 붙어 있는 막대들 아래부터가 보이는 공간
+    const avail = window.innerHeight - top0;
+    const delta = r.height <= avail ? r.top - (top0 + (avail - r.height) / 2) : r.top - top0 - 8;
+    if (Math.abs(delta) > 4) window.scrollBy({ top: delta, behavior: REDUCED ? "auto" : "smooth" });
+  }
   document.addEventListener("pointerdown", (e) => { if (!chartBox.contains(e.target) && !chartBox.classList.contains("full")) setZoomOn(false); });
   chartBox.addEventListener("mouseleave", () => { if (!chartBox.classList.contains("full")) setZoomOn(false); });
   // 확대 모드일 때는 그래프 칸 어디서 휠을 굴려도 페이지가 스크롤되지 않게 막는다
@@ -974,6 +1002,7 @@
   function setFull(on, fromPop) {
     chartBox.classList.toggle("full", on);
     document.body.classList.toggle("no-scroll", on);
+    fitChartHeight();   // 크게 보기에선 높이 지정을 풀고, 닫으면 다시 화면에 맞춤
     $("#fullText").textContent = on ? "닫기" : "크게 보기";
     setZoomOn(on);
     if (on && !fromPop) history.pushState({ full: 1 }, "");
@@ -1093,6 +1122,7 @@
   });
 
   render();
+  fitChartHeight();
   // 글꼴이 늦게 들어오면 알약 버튼 폭이 바뀌므로 한 번 더 맞춤
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(syncSegs);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { syncSegs(); fitChartHeight(); });
 })();
