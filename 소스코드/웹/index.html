@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow, noarchive">
-<meta name="theme-color" content="#0b0b0c">
+<meta name="theme-color" content="#0a0b0d">
 <script>document.documentElement.dataset.theme = "dark"; /* 항상 어두운 화면으로 시작 */</script>
 <meta name="color-scheme" content="dark light">
 <meta name="apple-mobile-web-app-title" content="AI 성능비교">
@@ -13,6 +13,9 @@
 <link rel="icon" type="image/png" href="icons/favicon-64.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <title>AI 모델 성능비교판</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -22,7 +25,14 @@
 <header class="topbar">
   <div class="topbar-in">
     <a class="brand" href="#top" aria-label="맨 위로">
-      <img src="icons/favicon-64.png" alt="" width="28" height="28">
+      <!-- 로고: 계단 모양 가성비 경계선과 그 아래 점들 -->
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+        <rect class="logo-bg" x="0.5" y="0.5" width="31" height="31" rx="8"/>
+        <path class="logo-grid" d="M5 10.5h22M5 16h22M5 21.5h22"/>
+        <circle class="logo-dot" cx="14" cy="24.5" r="1.6"/><circle class="logo-dot" cx="20" cy="20" r="1.6"/><circle class="logo-dot" cx="24.5" cy="15" r="1.6"/>
+        <path class="logo-line" d="M6 25h4.5v-6h5v-5h5v-5H26"/>
+        <circle class="logo-node" cx="10.5" cy="19" r="2"/><circle class="logo-node" cx="15.5" cy="14" r="2"/><circle class="logo-node" cx="20.5" cy="9" r="2"/>
+      </svg>
       <span class="brand-name">AI 모델 성능비교판</span>
     </a>
     <div class="status" id="status"></div>
@@ -47,18 +57,26 @@
 
   <div id="notice" class="notice" hidden></div>
 
-  <!-- ───────── 첫 화면: 한눈에 보는 결론 ───────── -->
-  <section class="hero reveal">
+  <!-- ───────── 01 오늘의 답: 질문(제목)과 답(카드 두 장) ───────── -->
+  <section class="hero reveal" aria-labelledby="heroTitle">
     <div class="hero-text">
-      <p class="eyebrow" id="eyebrow">두 평가기관의 점수를 합친 종합 성능</p>
-      <h1>돈을 쓴 만큼<br><span class="grad">똑똑한 AI</span>는 무엇일까</h1>
-      <p class="lede">점 하나가 <b>모델 × 추론 등급</b> 하나예요. 위로 갈수록 똑똑하고, 왼쪽으로 갈수록 쌉니다. <br>점선(가성비 경계선) 위의 모델을 고르면 돈을 낭비하지 않아요.</p>
+      <p class="kicker"><span class="idx">01</span><span>오늘의 답</span><span class="kdate" id="heroDate"></span></p>
+      <h1 id="heroTitle">돈을 쓴 만큼<br><em>똑똑한 AI</em>는 무엇일까</h1>
+      <p class="lede">점 하나가 <b>모델 × 추론 등급</b> 하나예요. 위로 갈수록 똑똑하고, 왼쪽으로 갈수록 쌉니다. <span class="acc-mark">연두색 선(가성비 경계선)</span> 위의 모델을 고르면 돈을 낭비하지 않아요.</p>
+      <dl class="facts" id="facts"></dl>
     </div>
     <div class="hero-cards" id="cards"></div>
   </section>
 
-  <!-- ───────── 조절 막대 (스크롤해도 따라옴) ───────── -->
-  <section class="dock" id="dock">
+  <!-- ───────── 02 지도 ───────── -->
+  <div class="sec-head reveal" id="mapHead">
+    <span class="idx">02</span>
+    <h2>비용 대비 성능 지도</h2>
+    <p>가로는 돈, 세로는 실력 — 연두색 계단보다 위에는 아직 아무 모델도 없어요</p>
+  </div>
+
+  <!-- 조절 막대 (스크롤해도 따라옴) -->
+  <section class="dock" id="dock" aria-label="보기 조절">
     <div class="dock-in">
       <div class="ctl">
         <span class="ctl-label">가로축</span>
@@ -121,7 +139,7 @@
     <div class="search-note" id="searchNote" role="status" hidden></div>
     <div class="pinbar" id="pinBar"></div>
     <div class="chart-wrap">
-      <div class="axis-y" id="axisY">종합 성능 점수 ↑</div>
+      <div class="axis-y" id="axisY">↑ 똑똑함 <span>종합 성능 점수</span></div>
       <div id="chart" class="chart" role="img" aria-label="모델별 비용 대비 종합 성능 그래프"></div>
       <div class="zoom-toast" id="zoomToast" aria-live="polite"></div>
       <div class="chart-empty" id="chartEmpty" hidden></div>
@@ -142,13 +160,15 @@
   <!-- ───────── 모델 상세 (점을 누르면 열림) ───────── -->
   <section class="panel detail" id="detail" aria-label="모델 상세"></section>
 
-  <!-- ───────── 순위표 ───────── -->
+  <!-- ───────── 03 순위표 ───────── -->
+  <div class="sec-head reveal">
+    <span class="idx">03</span>
+    <h2>순위표</h2>
+    <p>그래프에 보이는 모든 점을 숫자로</p>
+  </div>
   <section class="panel table-box reveal">
     <div class="table-head">
-      <div>
-        <h2>순위표</h2>
-        <p class="muted" id="tableSub">줄을 누르면 그래프에 고정돼요</p>
-      </div>
+      <p class="muted" id="tableSub">줄을 누르면 그래프에 고정돼요</p>
       <div class="table-opts">
         <label class="tog"><input type="checkbox" id="optBestOnly"><i></i><span>모델마다 최고 등급만</span></label>
         <label class="tog"><input type="checkbox" id="optPinnedOnly"><i></i><span>고정한 모델만</span></label>
@@ -173,6 +193,12 @@
     <button id="moreRows" class="btn btn-ghost more" type="button">더 보기</button>
   </section>
 
+  <!-- ───────── 04 출처와 방법 ───────── -->
+  <div class="sec-head">
+    <span class="idx">04</span>
+    <h2>출처와 방법</h2>
+    <p>두 평가기관의 공개 점수를 합쳐 하나의 종합 점수로</p>
+  </div>
   <footer class="foot" id="foot"></footer>
 </main>
 

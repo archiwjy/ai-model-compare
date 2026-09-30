@@ -81,7 +81,7 @@
   if (!PER_CO_OPTIONS.includes(S.perCo)) S.perCo = 3;
   for (const k of ["top", "budget", "weight", "enabled"]) delete S[k];   // 예전 버전 설정은 버림
   document.documentElement.dataset.theme = S.theme || "dark";
-  document.querySelector('meta[name="theme-color"]').content = S.theme === "light" ? "#f5f4f0" : "#0b0b0c";
+  document.querySelector('meta[name="theme-color"]').content = S.theme === "light" ? "#f4f3ee" : "#0a0b0d";
 
   // ───────── 도우미
   const $ = (sel) => document.querySelector(sel);
@@ -485,8 +485,9 @@
       if (X < g.l - 2 || X > g.l + gw + 2 || Y < g.t - 2 || Y > g.t + gh + 2) continue;   // 확대로 화면 밖
       cands.push({ d, X, Y, r: (d.symbolSize || 10) / 2 });
     }
+    if (st.soft) dots.push(...st.soft);   // 경계선도 되도록 가리지 않기
     cands.sort((a, b) => b.d.__lab.prio - a.d.__lab.prio);
-    const placed = [];
+    const placed = (st.block || []).slice();   // 지도 영역 이름 자리는 비워 둠
     const overlap = (R, q) => R.x < q.x + q.w && R.x + R.w > q.x && R.y < q.y + q.h && R.y + R.h > q.y;
     const hit = (R) => placed.some((q) => overlap(R, q));
     for (const c of cands) {
@@ -504,8 +505,15 @@
         : { x: c.X - w / 2, y: c.Y + c.r + dist, w, h };
       const inside = (R) => R.x >= 2 && R.x + R.w <= W - 2 && R.y >= 0 && R.y + R.h <= g.t + gh + 2;
       // 1순위: 다른 이름표·점을 모두 피하는 자리 → 2순위: 이름표만 피하는 자리
-      let pos = order.find((p) => { const R = rectOf(p); return inside(R) && !hit(R) && !dots.some((q) => overlap(R, q)); })
-        || order.find((p) => { const R = rectOf(p); return inside(R) && !hit(R); });
+      // 2순위에서는 점을 가장 적게 가리는 자리를 고름
+      const dotArea = (R) => dots.reduce((a, q) => a + (overlap(R, q) ? (Math.min(R.x + R.w, q.x + q.w) - Math.max(R.x, q.x)) * (Math.min(R.y + R.h, q.y + q.h) - Math.max(R.y, q.y)) : 0), 0);
+      let pos = order.find((p) => { const R = rectOf(p); return inside(R) && !hit(R) && !dots.some((q) => overlap(R, q)); });
+      if (!pos) {
+        let bv = Infinity;
+        for (const p of order) { const R = rectOf(p); if (!inside(R) || hit(R)) continue; const v = dotArea(R); if (v < bv) { bv = v; pos = p; } }
+        // 점을 꽤 가리는 자리밖에 없으면: 중요한 이름표(고정·강조·경계선 위)만 붙이고 나머지는 숨김 → 그래프가 지저분해지지 않게
+        if (pos && bv > 30 && L.prio < 500) pos = null;
+      }
       if (!pos && L.force) pos = order.find((p) => inside(rectOf(p))) || order[0];
       if (!pos) continue;
       placed.push(rectOf(pos));
@@ -518,8 +526,10 @@
 
   function renderChart(list, points) {
     renderedNarrow = isNarrow();
-    const txt = css("--text"), txt2 = css("--text-2"), muted = css("--muted"), grid = css("--grid"), axis = css("--axis"), surf = css("--surface"), ink = css("--frontier");
+    // 경계선 색 = 신호색(연두). 이 색은 경계선·가성비에만 쓴다
+    const txt = css("--text"), txt2 = css("--text-2"), muted = css("--muted"), grid = css("--grid"), axis = css("--axis"), surf = css("--surface"), ink = css("--acc");
     const font = "Pretendard Variable, Pretendard, Malgun Gothic, sans-serif";
+    const mono = "JetBrains Mono, Pretendard Variable, Pretendard, Consolas, monospace";   // 눈금 숫자는 계기판처럼 고정폭
     const narrow = isNarrow();
     const halo = css("--surface");   // 글자 테두리: 선이 지나가도 이름이 잘 읽히게
 
@@ -561,6 +571,7 @@
     const pinSet = new Set(S.pinned);
     const anyPin = list.some((M) => pinSet.has(M.key));   // 고정한 모델이 지금 그래프에 있을 때만 나머지를 흐리게
     const frModels = new Set(FR.front.map((p) => p.M.key));   // 가성비 경계선 위에 점이 있는 모델 → 이름표 우선
+    const topKeys = new Set(list.slice().sort((a, b) => b.best.score - a.best.score).slice(0, 3).map((M) => M.key));   // 점수 상위 3개 모델도 이름 우선
     const series = [];
     for (const M of list) {
       const col = colorOf(M.company);
@@ -591,7 +602,7 @@
           // 이름표 후보 (실제 자리는 아래 placeLabels 가 겹치지 않게 정함)
           label: { show: false },
           __lab: pinned ? { text: isTop ? `${M.name} · ${v.eff}` : v.eff, strong: isTop, small: !isTop, force: true, prio: 1000 + (isTop ? 50 : 0) + v.score }
-            : isTop && (labelled.has(M.key) || hl) && !dim ? { text: zoomedIn ? `${M.name} · ${v.eff}` : M.name, prio: (hl ? 800 : frModels.has(M.key) ? 500 : 300) + v.score }
+            : isTop && (labelled.has(M.key) || hl) && !dim ? { text: zoomedIn ? `${M.name} · ${v.eff}` : M.name, prio: (hl ? 800 : frModels.has(M.key) ? 500 : topKeys.has(M.key) ? 450 : 300) + v.score }
             : zoomedIn && !dim ? { text: `${M.name} · ${v.eff}`, alt: v.eff, small: true, prio: 100 + v.score } : null,   // 자리가 모자라면 등급만
           emphasis: {
             itemStyle: { opacity: 1 },
@@ -615,8 +626,60 @@
         animationDuration: 550, animationEasing: "cubicOut",
       });
     }
-    placeLabels(series, V, narrow, { txt, txt2, halo, font });
-    // 가성비 경계선: 흑백 점선 + 은은한 빛, 아래에 '오차 범위' 띠
+    // 지도 영역 이름: 경계선 위쪽 = 아직 아무도 없는 곳, 아래 오른쪽 = 돈 낭비 구역
+    //  (처음 보는 사람도 그래프를 바로 읽을 수 있게. 확대 중이거나 경계선을 끄면 숨김)
+    const G = narrow ? { left: 34, right: 12, top: chartBox.classList.contains("full") && S.pinned.length ? 70 : 22, bottom: 30 } : { left: 46, right: 18, top: 24, bottom: 34 };
+    const regions = [], regionRects = [];
+    const W = chartEl.clientWidth, H = chartEl.clientHeight, gw = W - G.left - G.right, gh = H - G.top - G.bottom;
+    const gx = (x) => G.left + ((tx(x) - tx(V.x0)) / (tx(V.x1) - tx(V.x0))) * gw;
+    const gy = (y) => G.top + ((V.y1 - y) / (V.y1 - V.y0)) * gh;
+    // 경계선(계단)의 가로·세로 구간: 이름표가 이 선 위에 올라가지 않게 피할 것으로 넘김
+    const lineRects = [];
+    for (let i = 0; i < front.length && front.length >= 2; i++) {
+      const a = front[i], b = front[i + 1];
+      const x1 = gx(a.x), y1 = gy(a.v.score), x2 = b ? gx(b.x) : G.left + gw, y2 = b ? gy(b.v.score) : y1;
+      lineRects.push({ x: Math.min(x1, x2), y: y1 - 2.5, w: Math.abs(x2 - x1), h: 5 });
+      if (b) lineRects.push({ x: x2 - 2.5, y: Math.min(y1, y2), w: 5, h: Math.abs(y2 - y1) });
+    }
+    if (S.frontier && front.length >= 2 && !VIEWBOX) {
+      const big = narrow ? 11.5 : 13, small = narrow ? 10.5 : 11.5, pad = narrow ? 8 : 14;
+      const mk = (a, b, side) => {
+        measureCtx.font = `700 ${big}px ${font}`; const w1 = measureCtx.measureText(a).width;
+        measureCtx.font = `500 ${small}px ${font}`; const w2 = measureCtx.measureText(b).width;
+        const w = Math.max(w1, w2) + 4, h = big + small + 10;
+        const x = side === "tl" ? G.left + pad : W - G.right - pad - w;
+        const y = side === "tl" ? G.top + pad : H - G.bottom - pad - h;
+        regionRects.push({ x, y, w, h });
+        regions.push({
+          type: "text", left: x, top: y, silent: true, z: 0,
+          style: {
+            text: `{a|${a}}\n{b|${b}}`, align: side === "tl" ? "left" : "right", opacity: 0.9,
+            rich: { a: { fontFamily: font, fontSize: big, fontWeight: 700, fill: txt2, lineHeight: big + 6 }, b: { fontFamily: font, fontSize: small, fontWeight: 500, fill: muted, lineHeight: small + 4 } },
+          },
+        });
+      };
+      mk("↖ 아직 아무도 없는 곳", "경계선보다 싸면서 더 똑똑한 모델은 아직 없어요", "tl");
+      mk("돈 낭비 구역 ↘", "같은 돈이면 경계선 위에 더 똑똑한 모델이 있어요", "br");
+    }
+    // 경계선에 이름을 직접 붙임 (범례를 찾지 않아도 바로 알 수 있게): 가장 싼 경계 점의 오른쪽 가로선 아래
+    if (S.frontier && front.length >= 2) {
+      const f0 = front.find((p) => p.x >= V.x0 && p.x <= V.x1 && p.v.score >= V.y0 && p.v.score <= V.y1);
+      if (f0) {
+        const fs = narrow ? 11 : 12, text = "가성비 경계선";
+        measureCtx.font = `700 ${fs}px ${font}`;
+        const w = measureCtx.measureText(text).width + 4, h = fs + 4;
+        const X = gx(f0.x) + 12;
+        let Y = gy(f0.v.score) + 9;
+        if (Y + h > G.top + gh - 4) Y = gy(f0.v.score) - 9 - h;   // 바닥에 닿으면 선 위로
+        if (X + w < G.left + gw) {
+          regionRects.push({ x: X, y: Y, w, h });
+          regions.push({ type: "text", left: X, top: Y, silent: true, z: 5,
+            style: { text, fill: ink, font: `700 ${fs}px ${font}`, stroke: surf, lineWidth: 3 } });
+        }
+      }
+    }
+    placeLabels(series, V, narrow, { txt, txt2, halo, font, block: regionRects, soft: lineRects });
+    // 가성비 경계선: 연두색 실선 + 빛, 아래에 '오차 범위' 띠 — 이 화면의 주인공
     if (front.length >= 2) {
       const pts = front.map((p) => [p.x, +p.v.score.toFixed(2)]);
       pts.push([V.x1 * 1.5, pts[pts.length - 1][1]]);   // 가장 비싼 경계 점 오른쪽으로도 수평 연장
@@ -627,21 +690,23 @@
       });
       series.push({
         id: "__fband", type: "line", step: "end", silent: true, z: 1, stack: "fband", symbol: "none",
-        data: pts.map(([x]) => [x, k]), lineStyle: { opacity: 0 }, areaStyle: { color: ink, opacity: 0.1 },
+        data: pts.map(([x]) => [x, k]), lineStyle: { opacity: 0 }, areaStyle: { color: ink, opacity: 0.08 },
         tooltip: { show: false }, emphasis: { disabled: true }, animation: false,
       });
       series.push({
         id: "__frontier", name: "가성비 경계선", type: "line", step: "end", silent: true, z: 2,
         data: pts, showSymbol: false,
-        lineStyle: { type: [6, 5], width: 2, color: ink, opacity: 0.9, shadowBlur: 10, shadowColor: ink + "55" },
+        lineStyle: { width: 2, color: ink, opacity: 0.95, shadowBlur: 14, shadowColor: ink + "80", cap: "round", join: "round" },
         tooltip: { show: false }, emphasis: { disabled: true },
-        animationDuration: 900, animationEasing: "cubicInOut",
+        animationDuration: 1100, animationEasing: "cubicInOut",
       });
     }
 
+    const axLabel = { fontFamily: mono, fontSize: 11 };
     const xAxis = S.x === "date"
       ? Object.assign({ type: "time", splitLine: { show: true, lineStyle: { color: grid } }, axisLine: { lineStyle: { color: axis } }, axisTick: { show: false } }, dateAxisView(V, muted))
       : Object.assign({ type: "log", logBase: 10, splitLine: { show: true, lineStyle: { color: grid } }, axisLine: { lineStyle: { color: axis } }, minorSplitLine: { show: false } }, logAxisView(V, muted));
+    Object.assign(xAxis.axisLabel, axLabel);
 
     // 그래프 아래 설명
     const xName = {
@@ -653,16 +718,16 @@
     const noX = list.reduce((n, M) => n + M.vs.filter((v) => xOf(v) == null).length, 0);
     $("#axisX").textContent = xName + (noX ? ` · 비용 정보가 없어 빠진 점 ${noX}개 (표에는 있음)` : "");
 
-    const full = chartBox.classList.contains("full");
     chart.setOption({
       backgroundColor: "transparent",
       animation: !quietRender && !REDUCED,
       textStyle: { fontFamily: font },
-      grid: narrow ? { left: 34, right: 12, top: full && S.pinned.length ? 70 : 22, bottom: 30 } : { left: 46, right: 18, top: 24, bottom: 34 },
+      grid: G,
+      graphic: regions,
       xAxis,
       yAxis: {
         type: "value", min: V.y0, max: V.y1,
-        axisLabel: { color: muted, showMinLabel: false, showMaxLabel: false, formatter: (v) => (Number.isInteger(v) ? v : v.toFixed(1)) },
+        axisLabel: Object.assign({ color: muted, showMinLabel: false, showMaxLabel: false, formatter: (v) => (Number.isInteger(v) ? v : v.toFixed(1)) }, axLabel),
         splitLine: { lineStyle: { color: grid } }, axisLine: { show: false }, minInterval: 0.5,
       },
       tooltip: {
@@ -1059,7 +1124,7 @@
     const el = $("#pinBar");
     el.innerHTML = "";
     if (!S.pinned.length) {
-      el.innerHTML = `<span class="hint"><svg viewBox="0 0 24 24" style="width:14px;height:14px"><path d="M9 4v6l-2 3h10l-2-3V4M12 13v7"/></svg>${CAN_HOVER ? "점을 누르면 그 모델이 고정돼요 — 여러 개 골라 비교할 수 있어요" : "점을 누르면 설명, 한 번 더 누르면 고정돼요 — 여러 개 골라 비교할 수 있어요"}</span>`;
+      el.innerHTML = `<span class="hint"><svg viewBox="0 0 24 24" style="width:14px;height:14px"><path d="M9 4v6l-2 3h10l-2-3V4M12 13v7"/></svg>${CAN_HOVER ? "점을 누르면 그 모델이 고정돼요" : "점을 누르면 설명, 한 번 더 누르면 고정돼요"}<span class="hint-x"> — 여러 개 골라 비교할 수 있어요</span></span>`;
       return;
     }
     for (const key of S.pinned) {
@@ -1487,7 +1552,7 @@
     const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
     S.theme = cur === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = S.theme;
-    document.querySelector('meta[name="theme-color"]').content = S.theme === "light" ? "#f5f4f0" : "#0b0b0c";
+    document.querySelector('meta[name="theme-color"]').content = S.theme === "light" ? "#f4f3ee" : "#0a0b0d";
     colorCache = {}; save(); render();
   };
   matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => { if (!S.theme) render(); });
@@ -1518,13 +1583,35 @@
   } catch (e) { /* 이 부분이 실패해도 나머지 화면은 그대로 */ }
   // 믿을 만한 정도: 두 기관이 같은 등급을 쟀을 때 점수가 얼마나 비슷한지 (보정 없이 원래 값 그대로)
   try {
-  (function eyebrow() {
-    const dis = computeAll().flatMap((M) => M.vs).map((v) => v.disagree).filter((x) => x != null).sort((a, b) => a - b);
+  // 첫 화면 핵심 숫자 줄: 모델 수 · 점 수 · 평가기관 · 두 기관 점수 차이 (보정 없이 원래 값 그대로)
+  (function facts() {
+    const all = computeAll();
+    const dis = all.flatMap((M) => M.vs).map((v) => v.disagree).filter((x) => x != null).sort((a, b) => a - b);
     const med = dis.length ? dis[Math.floor(dis.length / 2)] : null;
     const r = D.sources.aa && D.sources.aa.fit && D.sources.aa.fit.r;
-    const el = $("#eyebrow");
-    el.textContent = `Epoch AI · Artificial Analysis 점수 합산` + (med != null ? ` · 두 기관 차이 보통 ${med.toFixed(1)}점` : "") + ` · 모델 ${D.models.length}개`;
-    if (med != null) el.title = `두 기관이 모두 잰 등급 ${dis.length}개에서, 두 점수 차이의 중앙값이 ${med.toFixed(1)}점입니다.` + (r ? ` 점수 상관 ${r.toFixed(2)} (1 에 가까울수록 두 기관이 같은 순서로 평가).` : "") + ` 작을수록 믿을 만합니다.`;
+    const srcs = SRC_ORDER.filter((s) => D.sources[s] && D.sources[s].ok).map(srcName);
+    const nPts = all.reduce((n, M) => n + M.vs.length, 0);
+    const f = [
+      { k: "모델", v: D.models.length.toLocaleString("ko-KR"), u: "개" },
+      { k: "모델 × 추론 등급", v: nPts.toLocaleString("ko-KR"), u: "점", t: "그래프의 점 하나 = 모델 하나의 추론 등급 하나 (실제로 고를 수 있는 등급만)" },
+      { k: "평가기관", v: String(srcs.length), u: "곳", t: srcs.join(" · ") + " 의 점수를 합쳐 하나의 종합 점수로" },
+      med != null ? { k: "두 기관 점수 차이", v: med.toFixed(1), u: "점 (보통)",
+        t: `두 기관이 모두 잰 등급 ${dis.length}개에서, 두 점수 차이의 중앙값이 ${med.toFixed(1)}점입니다.` + (r ? ` 점수 상관 ${r.toFixed(2)} (1 에 가까울수록 두 기관이 같은 순서로 평가).` : "") + ` 작을수록 믿을 만합니다.` } : null,
+    ].filter(Boolean);
+    $("#facts").innerHTML = f.map((x) => `<div class="fact"${x.t ? ` title="${esc(x.t)}"` : ""}><dt>${esc(x.k)}</dt><dd>${esc(x.v)}<small>${esc(x.u)}</small></dd></div>`).join("");
+    // 처음 열 때 숫자가 계기판처럼 0에서 차오름 (움직임 줄이기 설정이면 바로 표시)
+    if (!REDUCED) $$("#facts dd").forEach((dd) => {
+      const node = dd.firstChild, target = node.textContent, n = parseFloat(target.replace(/,/g, ""));
+      if (isNaN(n)) return;
+      const dec = (target.split(".")[1] || "").length, t0 = performance.now(), dur = 1000;
+      const step = (t) => {
+        const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+        node.textContent = k < 1 ? (n * e).toLocaleString("ko-KR", { minimumFractionDigits: dec, maximumFractionDigits: dec }) : target;
+        if (k < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+    $("#heroDate").textContent = String(D.generated || "").replace(/-/g, ".") + " 기준";
   })();
   } catch (e) { /* 이 부분이 실패해도 나머지 화면은 그대로 */ }
   try {
@@ -1616,6 +1703,8 @@
   $("#resetSettings").onclick = () => resetSettings();
   pickCompanies(computeAll());
   render();
+  // 글꼴(계기판 숫자·한글)이 늦게 도착하면 그래프 글자를 한 번 더 그림 (그래프는 그림이라 글꼴이 자동으로 안 바뀜)
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (VIEW) { quietRender = true; renderChart(VIEW.list, VIEW.points); quietRender = false; } });
   fitChartHeight();
   // 글꼴이 늦게 들어오면 알약 버튼 폭이 바뀌므로 한 번 더 맞춤
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { syncSegs(); fitChartHeight(); });
