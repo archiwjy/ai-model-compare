@@ -72,9 +72,13 @@ def main(force=False):
     ep_scores, ep_meta = combine.epoch_capability(raw["epoch"])
     score_src = {"epoch": {k: (v[0], v[1]) for k, v in ep_scores.items()}}
     raw_names = {}
-    # 점수는 Epoch AI + Artificial Analysis 두 곳만 (LiveBench 는 비용 기록에만 씀)
+    # 점수 출처: Epoch AI + Artificial Analysis 두 곳
+    #  · 2026-09-30 검증: 다른 기관을 더 넣어 '서로를 얼마나 잘 맞히는지' 비교했으나 모두 정확도가 떨어져서 넣지 않음
+    #    - ARC Prize 공식 결과로 Epoch 의 ARC 점수 보충: 두 곳 일치도 0.951→0.946, 점수 차이 1.73→1.82점 (퍼즐 한 분야라 치우침)
+    #  · LiveBench 도 넣어 검증해 봤으나 (2026-09-30) 다른 두 곳과 일치도가 낮고(상관 0.86~0.87, Epoch-AA 는 0.95),
+    #    넣으면 서로를 맞히는 오차가 오히려 커져서(1.90→2.19점, 3.12→3.36점) 점수에는 쓰지 않음. 비용 기록에만 씀.
     for s in ("aa",):
-        if s in raw:
+        if s in raw and raw[s].get("scores"):
             d = {}
             for k, v in raw[s]["scores"].items():
                 se = v.get("ci")

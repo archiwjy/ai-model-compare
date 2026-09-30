@@ -175,16 +175,17 @@ def load_livebench(exclude_words):
     release = None
     try:
         html = fetch("https://livebench.ai/", "livebench_index.html").decode("utf-8", "ignore")
-        m = re.search(r'src="(/static/js/main\.[^"]+\.js)"', html)
+        m = re.search(r'src="\.?(/static/js/main\.[^"]+\.js)"', html)
         if m:
             js = fetch("https://livebench.ai" + m.group(1), "livebench_main.js").decode("utf-8", "ignore")
-            dates = re.findall(r'"(20\d{2}-\d{2}-\d{2})"', js)
-            if dates:
-                release = max(dates)
+            dates = sorted(set(re.findall(r'"(20\d{2}-\d{2}-\d{2})"', js)), reverse=True)
     except Exception as e:
+        dates = []
         log(f"  ! LiveBench 최신 날짜 확인 실패: {e}")
-    candidates = [release] if release else []
-    candidates.append("2026-06-25")
+    # 사이트 코드에 적힌 날짜 중 가장 최근 문제 세트부터 차례로 시도 (파일이 있는 첫 번째 것을 씀)
+    candidates = [d for d in dates if d >= "2026-01-01"][:6]
+    if "2026-06-25" not in candidates:
+        candidates.append("2026-06-25")
     table = cats = cost = None
     for rel in candidates:
         tag = rel.replace("-", "_")

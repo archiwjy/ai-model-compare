@@ -1202,7 +1202,15 @@
   }
   renderStatus();
   setInterval(renderStatus, 60000);
-  $("#eyebrow").textContent = `Epoch AI · Artificial Analysis 점수 합산 · 모델 ${D.models.length}개`;
+  // 믿을 만한 정도: 두 기관이 같은 등급을 쟀을 때 점수가 얼마나 비슷한지 (보정 없이 원래 값 그대로)
+  (function eyebrow() {
+    const dis = computeAll().flatMap((M) => M.vs).map((v) => v.disagree).filter((x) => x != null).sort((a, b) => a - b);
+    const med = dis.length ? dis[Math.floor(dis.length / 2)] : null;
+    const r = D.sources.aa && D.sources.aa.fit && D.sources.aa.fit.r;
+    const el = $("#eyebrow");
+    el.textContent = `Epoch AI · Artificial Analysis 점수 합산` + (med != null ? ` · 두 기관 차이 보통 ${med.toFixed(1)}점` : "") + ` · 모델 ${D.models.length}개`;
+    if (med != null) el.title = `두 기관이 모두 잰 등급 ${dis.length}개에서, 두 점수 차이의 중앙값이 ${med.toFixed(1)}점입니다.` + (r ? ` 점수 상관 ${r.toFixed(2)} (1 에 가까울수록 두 기관이 같은 순서로 평가).` : "") + ` 작을수록 믿을 만합니다.`;
+  })();
   (function footer() {
     const src = SRC_ORDER.filter((s) => D.sources[s] && D.sources[s].ok).map((s) => {
       const I = D.sources[s];
