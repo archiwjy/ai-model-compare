@@ -591,7 +591,7 @@ table#table { width: 100%; border-collapse: collapse; font-size: 14px; min-width
 @media (max-width: 700px) { .pick-conf .ck { display: none; } .pick-alt { font-size: 11px; } }
 
 /* 가성비 추천: 1·2·3위 표 (모두 같은 모양) — 1줄: 모델 / 2줄: 성능 막대 · 비용 / 3줄: 최고 성능과 비교 */
-.pick-value { cursor: default; }
+.pick-table { cursor: default; }
 .vt { margin-top: 10px; display: grid; gap: 3px; }
 .vt-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; grid-template-areas: "rk vn vn" "rk vs vc" "rk vd vd"; align-items: center; gap: 3px 10px; padding: 7px 8px; border-radius: 10px; cursor: pointer; text-align: left; transition: background .2s; }
 .vt-row:hover { background: var(--surface-3); }
@@ -611,7 +611,7 @@ table#table { width: 100%; border-collapse: collapse; font-size: 14px; min-width
 .vt-row .vc { grid-area: vc; text-align: right; font-size: 13.5px; font-weight: 700; white-space: nowrap; }
 .vt-row .vd { grid-area: vd; font-size: 11.5px; color: var(--muted); }
 .vt-row .vd .up { color: var(--good); font-weight: 700; }
-.pick-value .pick-conf { margin-top: 8px; }
+.pick-table .pick-conf { margin-top: 8px; }
 @media (max-width: 700px) {
   .vt-row { grid-template-columns: 18px minmax(0, 1fr); grid-template-areas: "rk vn" "rk vs" "rk vc" "rk vd"; padding: 6px 4px; gap: 2px 6px; }
   .vt-row .rk { width: 18px; height: 18px; font-size: 11px; }
@@ -619,6 +619,15 @@ table#table { width: 100%; border-collapse: collapse; font-size: 14px; min-width
   .vt-row .vn .dot { display: none; }
   .vt-row .vs, .vt-row .vc { font-size: 12px; text-align: left; }
   .vt-row .vd { font-size: 10.5px; }
-  .pick-value .pick-conf .ck { display: none; }
+  .pick-table .pick-conf .ck { display: none; }
 }
 }
+
+/* 최고 성능 표: 1위는 금색, 가성비 표 1위는 초록 */
+.pick[data-kind="top"] .vt-row.first { background: color-mix(in srgb, var(--warn) 9%, transparent); }
+.pick[data-kind="top"] .vt-row.first:hover { background: color-mix(in srgb, var(--warn) 15%, transparent); }
+.pick[data-kind="top"] .vt-row.first .rk { background: var(--warn); color: #1c1300; }
+.pick[data-kind="top"] .vt-row.first .vbar i { background: var(--warn); }
+.vt-row .vd .down { color: var(--bad); font-weight: 700; }
+.pick-label { white-space: nowrap; }
+.pick-table .pick-sub { cursor: help; }
