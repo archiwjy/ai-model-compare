@@ -590,20 +590,35 @@ table#table { width: 100%; border-collapse: collapse; font-size: 14px; min-width
 .pick-note .muted { color: var(--muted); font-weight: 500; }
 @media (max-width: 700px) { .pick-conf .ck { display: none; } .pick-alt { font-size: 11px; } }
 
-/* 가성비 추천 2위·3위 */
-.pick-ranks { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 6px; display: grid; gap: 2px; }
-.pick-rank { display: grid; grid-template-columns: 20px 1fr auto; grid-template-areas: "rk rn rs" "rk rd rd"; align-items: center; gap: 0 8px; padding: 5px 6px; border-radius: 9px; text-align: left; transition: background .2s; }
-.pick-rank:hover { background: var(--surface-3); }
-.pick-rank .rk { grid-area: rk; width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; font-size: 11px; font-weight: 800; background: var(--surface-3); color: var(--text-2); }
-.pick-rank .rn { grid-area: rn; font-size: 13px; min-width: 0; }
-.pick-rank .rn b { font-weight: 700; }
-.pick-rank .rs { grid-area: rs; font-size: 12.5px; font-weight: 650; color: var(--text-2); white-space: nowrap; }
-.pick-rank .rd { grid-area: rd; font-size: 11.5px; color: var(--muted); }
-.pick-rank .muted { color: var(--muted); font-size: 11.5px; }
+/* 가성비 추천: 1·2·3위 표 (모두 같은 모양) — 1줄: 모델 / 2줄: 성능 막대 · 비용 / 3줄: 최고 성능과 비교 */
+.pick-value { cursor: default; }
+.vt { margin-top: 10px; display: grid; gap: 3px; }
+.vt-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; grid-template-areas: "rk vn vn" "rk vs vc" "rk vd vd"; align-items: center; gap: 3px 10px; padding: 7px 8px; border-radius: 10px; cursor: pointer; text-align: left; transition: background .2s; }
+.vt-row:hover { background: var(--surface-3); }
+.vt-row.first { background: color-mix(in srgb, var(--good) 8%, transparent); }
+.vt-row.first:hover { background: color-mix(in srgb, var(--good) 14%, transparent); }
+.vt-row .rk { grid-area: rk; align-self: start; width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; font-size: 12px; font-weight: 800; background: var(--surface-3); color: var(--text-2); }
+.vt-row.first .rk { background: var(--good); color: #04130c; }
+.vt-row .vn { grid-area: vn; min-width: 0; font-size: 14px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; }
+.vt-row .vn b { font-weight: 700; }
+.vt-row .vn .dot { width: 8px; height: 8px; border-radius: 3px; flex: none; }
+.vt-row small { font-size: 11px; color: var(--muted); font-weight: 500; margin-right: 5px; }
+.vt-row .vs { grid-area: vs; display: flex; align-items: center; gap: 0; font-size: 13.5px; min-width: 0; }
+.vt-row .vs b { font-weight: 750; margin-right: 8px; }
+.vbar { flex: 1; max-width: 160px; height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.vbar i { display: block; height: 100%; border-radius: 99px; background: var(--text-2); }
+.vt-row.first .vbar i { background: var(--good); }
+.vt-row .vc { grid-area: vc; text-align: right; font-size: 13.5px; font-weight: 700; white-space: nowrap; }
+.vt-row .vd { grid-area: vd; font-size: 11.5px; color: var(--muted); }
+.vt-row .vd .up { color: var(--good); font-weight: 700; }
+.pick-value .pick-conf { margin-top: 8px; }
 @media (max-width: 700px) {
-  .pick-rank { grid-template-columns: 18px 1fr; grid-template-areas: "rk rn" "rk rs"; padding: 4px 2px; }
-  .pick-rank .rd { display: none; }
-  .pick-rank .rn { font-size: 12px; }
-  .pick-rank .rs { font-size: 11.5px; }
+  .vt-row { grid-template-columns: 18px minmax(0, 1fr); grid-template-areas: "rk vn" "rk vs" "rk vc" "rk vd"; padding: 6px 4px; gap: 2px 6px; }
+  .vt-row .rk { width: 18px; height: 18px; font-size: 11px; }
+  .vt-row .vn { font-size: 12px; }
+  .vt-row .vn .dot { display: none; }
+  .vt-row .vs, .vt-row .vc { font-size: 12px; text-align: left; }
+  .vt-row .vd { font-size: 10.5px; }
+  .pick-value .pick-conf .ck { display: none; }
 }
-.pick-rank .rd .up { color: var(--good); font-weight: 700; }
+}

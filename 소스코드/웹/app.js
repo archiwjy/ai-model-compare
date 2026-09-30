@@ -909,15 +909,13 @@
   }
   const ICON_TOP = `<svg viewBox="0 0 24 24"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4ZM17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>`;
   const ICON_VALUE = `<svg viewBox="0 0 24 24"><path d="M12 2v20M17 6.5C17 4.6 14.8 3.5 12 3.5S7 4.6 7 6.5 9 9.2 12 10s5 2 5 4-2.2 3.5-5 3.5-5-1.1-5-3"/></svg>`;
-  // 얼마나 싼지: 2배 미만은 "35% 쌈", 그 이상은 "2.6배 쌈"
-  const cheaperText = (r) => (r < 2 ? `${Math.round((1 - 1 / r) * 100)}% 쌈` : `${r.toFixed(1)}배 쌈`);
   function renderCards(points) {
     const el = $("#cards");
     const all = points.map((p) => p.v);
     const withCost = points.filter((p) => costFor(p.v) != null && (S.estimated || p.v.costKind === "측정")).map((p) => p.v);
     if (!all.length) { el.innerHTML = ""; return; }
     const top = all.reduce((a, b) => (b.score > a.score ? b : a));
-    const cards = [{ kind: "top", label: "최고 성능", icon: ICON_TOP, sub: "지금 보이는 모델 중 1등", v: top }];
+    const cards = [{ kind: "top", label: "최고 성능", icon: ICON_TOP, sub: "지금 보이는 모델 중 1등", v: top, note: `<span class="muted">옆 가성비 추천의 비교 기준이에요</span>` }];
     // 가성비 추천: "1등과 실력 차이가 오차 범위 안인 것" 중 가장 싼 것
     //  · 고정된 몇 점이 아니라, 1등과 후보 각자의 점수 오차를 합친 범위로 비교 (√(오차₁²+오차₂²))
     //    → 두 기관이 모두 잰 모델끼리는 엄격하게, 한 기관만 잰 모델은 너그럽게 (그래프의 오차 띠와 같은 원리)
@@ -932,31 +930,40 @@
       if (!frontierPts.length || v.score > frontierPts[frontierPts.length - 1].score + 1e-9) frontierPts.push(v);
     const below = cheap ? frontierPts.filter((v) => costFor(v) < costFor(cheap) && v.score < cheap.score).reverse() : [];
     if (cheap) {
-      const ratio = costFor(top) && costFor(cheap) ? costFor(top) / costFor(cheap) : null;
-      const gap = top.score - cheap.score;
       // 추천이 얼마나 확실한지: 두 기관 측정? 비용 실측? 다음 후보와 가격 차이가 충분한가?
-      // 다음으로 싼 후보 (가격 차이가 충분한지 확인용)
-      const next = near[1] || null;
+      const next = near[1] || null;   // 다음으로 싼 후보 (가격 차이가 충분한지 확인용)
       const nextRatio = next ? costFor(next) / costFor(cheap) : null;
       const checks = [
         cheap.nReal >= 2 ? { ok: true, t: "두 기관 모두 측정" } : { ok: false, t: "한 기관만 측정" },
         cheap.costKind === "측정" ? { ok: true, t: "비용 실측" } : { ok: false, t: "비용 추정" },
-        !next ? { ok: true, t: "비슷한 후보 없음" } : nextRatio >= 1.25 ? { ok: true, t: `다음 후보보다 ${nextRatio.toFixed(1)}배 쌈` } : { ok: false, t: `비슷한 값의 후보 있음` },
+        !next ? { ok: true, t: "비슷한 후보 없음" } : nextRatio >= 1.25 ? { ok: true, t: "비슷한 값의 후보 없음" } : { ok: false, t: "비슷한 값의 후보 있음" },
       ];
       const nOk = checks.filter((c) => c.ok).length;
       const level = nOk === 3 ? { k: "hi", t: "확실" } : nOk === 2 ? { k: "mid", t: "대체로 확실" } : { k: "lo", t: "참고용" };
-      let note = cheap === top ? "최고 성능 모델이 가장 싸기도 해요" : `최고보다 <b>${gap.toFixed(1)}점</b> 낮고 <span class="up">${ratio ? ratio.toFixed(1) + "배 저렴" : ""}</span> <span class="muted">(오차 범위 ±${band(cheap).toFixed(1)} 안)</span>`;
-      let extra = `<div class="pick-conf ${level.k}" title="확실: 세 가지 모두 충족 · 대체로 확실: 두 가지 · 참고용: 한 가지 이하"><span class="lv">${level.t}</span>` +
+
+      // 1·2·3위를 모두 같은 모양으로: 성능(막대) · 비용 · "최고 성능과 비교"
+      //  (항상 최고 성능 모델이 기준, 표현도 "성능 −○점 · 비용 ○% 절약" 하나로 통일)
+      const rows = [cheap, ...below.slice(0, 2)];
+      const topCost = costFor(top);
+      const lo = Math.min(...rows.map((v) => v.score)) - 3;
+      const barW = (v) => Math.max(6, Math.min(100, ((v.score - lo) / (top.score - lo)) * 100));
+      const cmp = (v) => {
+        const gap = top.score - v.score;
+        const perf = v === top ? "최고 성능 모델 그대로" : gap < 0.05 ? "성능 같음" : `성능 −${gap.toFixed(1)}점`;
+        const save = topCost && v !== top ? Math.round((1 - costFor(v) / topCost) * 100) : null;
+        return perf + (save != null ? ` · <span class="up">비용 ${save}% 절약</span>` : "");
+      };
+      const html =
+        rows.map((v, i) =>
+          `<div class="vt-row${i === 0 ? " first" : ""}" data-key="${esc(v.m.key)}" data-eff="${esc(v.effort)}">` +
+          `<span class="rk">${i + 1}</span>` +
+          `<span class="vn"><span class="dot" style="background:${colorOf(v.m.company)}"></span><b>${esc(v.m.name)}</b> <span class="eff-chip sm">${esc(v.eff)}</span></span>` +
+          `<span class="vs"><small>성능</small><b>${v.score.toFixed(1)}</b><i class="vbar"><i style="width:${barW(v).toFixed(0)}%"></i></i></span>` +
+          `<span class="vc"><small>비용</small>${fmtCost(costFor(v))}</span>` +
+          `<span class="vd">최고 성능과 비교: ${cmp(v)}</span></div>`).join("") +
+        `<div class="pick-conf ${level.k}" title="1위 추천이 얼마나 확실한지. 확실: 세 가지 모두 충족 · 대체로 확실: 두 가지 · 참고용: 한 가지 이하"><span class="lv">1위 ${level.t}</span>` +
         checks.map((c) => `<span class="ck ${c.ok ? "ok" : "no"}">${c.ok ? "✓" : "!"} ${esc(c.t)}</span>`).join("") + `</div>`;
-      const more = below.slice(0, 2);
-      if (more.length) {
-        extra += `<div class="pick-ranks">` + more.map((v, i) =>
-          `<div class="pick-rank" data-key="${esc(v.m.key)}" data-eff="${esc(v.effort)}"><span class="rk">${i + 2}</span>` +
-          `<span class="rn"><b>${esc(v.m.name)}</b> <span class="eff-chip sm">${esc(v.eff)}</span></span>` +
-          `<span class="rs">${v.score.toFixed(1)}점 · ${fmtCost(costFor(v))}</span>` +
-          `<span class="rd">1위보다 ${(cheap.score - v.score).toFixed(1)}점 낮고 <span class="up">${cheaperText(costFor(cheap) / costFor(v))}</span></span></div>`).join("") + `</div>`;
-      }
-      cards.push({ kind: "value", label: "가성비 추천", icon: ICON_VALUE, sub: "1위: 최고와 오차 범위 안에서 가장 쌈", v: cheap, note, extra });
+      cards.push({ kind: "value", label: "가성비 추천", icon: ICON_VALUE, sub: `위에서부터 성능 높은 순 · 비용 = ${costUnit()}`, v: cheap, html });
     }
     // 같은 자리 카드는 다시 만들지 않고 내용만 바꿔서 숫자가 부드럽게 변하게
     cards.forEach((c, i) => {
@@ -964,18 +971,20 @@
       if (!card) { card = document.createElement("button"); card.type = "button"; card.className = "pick"; el.append(card); }
       const v = c.v, col = colorOf(v.m.company);
       card.style.setProperty("--pc", col);
-      card.innerHTML =
-        `<div class="pick-top"><span class="pick-label"><span class="ic">${c.icon}</span>${c.label}</span><span class="pick-sub">${esc(c.sub)}</span></div>` +
+      const head = `<div class="pick-top"><span class="pick-label"><span class="ic">${c.icon}</span>${c.label}</span><span class="pick-sub">${esc(c.sub)}</span></div>`;
+      card.classList.toggle("pick-value", !!c.html);
+      if (c.html) {   // 가성비 추천: 1·2·3위 표, 줄을 누르면 그 모델을 보여 줌
+        card.innerHTML = head + `<div class="vt">${c.html}</div>`;
+        card.onclick = (e) => { const r = e.target.closest(".vt-row"); if (r) pinAndShow(r.dataset.key, r.dataset.eff); };
+        return;
+      }
+      card.innerHTML = head +
         `<div class="pick-name"><span class="dot" style="background:${col}"></span><span class="nm">${esc(v.m.name)}</span><span class="eff-chip">${esc(v.eff)}</span></div>` +
         `<div class="pick-stats"><div class="stat"><div class="v"><span data-n="score">${v.score.toFixed(1)}</span><small>점</small></div><div class="k">종합 성능</div></div>` +
         `<div class="stat"><div class="v">${fmtCost(costFor(v))}</div><div class="k">${costUnit()} 비용</div></div></div>` +
         (c.note ? `<div class="pick-note">${c.note}</div>` : "") + (c.extra || "");
       countUp(card.querySelector('[data-n="score"]'), v.score, 1);
-      card.onclick = (e) => {
-        const r = e.target.closest(".pick-rank");   // 2위·3위 줄을 누르면 그 모델을 보여 줌
-        if (r) pinAndShow(r.dataset.key, r.dataset.eff);
-        else pinAndShow(v.m.key, v.effort);
-      };
+      card.onclick = () => pinAndShow(v.m.key, v.effort);
     });
     while (el.children.length > cards.length) el.lastChild.remove();
   }
