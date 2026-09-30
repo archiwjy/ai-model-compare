@@ -64,9 +64,7 @@
         <span class="ctl-label">가로축</span>
         <div class="seg" id="xAxisSeg">
           <button data-v="cost" type="button" title="문제 1개를 푸는 데 실제로 든 돈">문제당 비용</button>
-          <button data-v="costok" type="button" title="문제당 비용 ÷ 정답률. 자주 틀리는 모델일수록 비싸져요">맞힌 문제당</button>
-          <button data-v="price" type="button" title="100만 토큰당 가격표 (입력3:출력1 평균)">가격표</button>
-          <button data-v="date" type="button">출시일</button>
+          <button data-v="costok" type="button" title="문제당 비용 ÷ 정답률 (매우 어려운 문제 기준). 자주 틀리는 모델일수록 비싸져요">맞힌 문제당</button>
         </div>
       </div>
       <div class="ctl">
@@ -78,15 +76,6 @@
           <button data-v="0" type="button">전체</button>
         </div>
       </div>
-      <div class="ctl" id="diffCtl">
-        <span class="ctl-label" title="어려운 일일수록 약한 모델의 정답률이 크게 떨어져요">난이도</span>
-        <div class="seg" id="diffSeg">
-          <button data-v="easy" type="button" title="간단한 질문·번역·요약">쉬움</button>
-          <button data-v="normal" type="button" title="일반 업무·대학원 수준 문제">보통</button>
-          <button data-v="hard" type="button" title="어려운 코딩·전문 분석">어려움</button>
-          <button data-v="vhard" type="button" title="최고난도 연구·복잡한 에이전트 작업">매우 어려움</button>
-        </div>
-      </div>
       <div class="ctl">
         <span class="ctl-label">회사별</span>
         <div class="menu" id="perCoMenu">
@@ -96,7 +85,7 @@
       </div>
       <label class="search">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="search" type="search" placeholder="모델 찾기 (claude, gpt-6 …)" autocomplete="off">
+        <input id="search" type="search" placeholder="모델 찾기 · 쉼표로 여러 개 (예: 제미나이, gpt, claude opus)" autocomplete="off">
       </label>
       <div class="menu" id="viewMenu">
         <button class="menu-btn" type="button" aria-haspopup="true" title="보기 설정">

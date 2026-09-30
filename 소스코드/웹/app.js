@@ -241,12 +241,40 @@
     return models;
   }
 
+  // ───────── 검색: 쉼표로 여러 개를 한 번에 (예: "제미나이, gpt, claude opus")
+  //  · 쉼표로 나눈 검색어 중 하나라도 맞으면 보여 줌 (부분만 쳐도 됨)
+  //  · 한 검색어 안의 띄어쓴 단어는 모두 들어 있어야 함 ("claude opus" → Claude Opus 만)
+  //  · 한글 이름도 알아들음 (제미나이 → gemini, 클로드 → claude …)
+  const KO_ALIAS = [
+    ["챗지피티", "gpt"], ["지피티", "gpt"], ["제미나이", "gemini"], ["제미니", "gemini"], ["클로드", "claude"], ["그록", "grok"],
+    ["딥시크", "deepseek"], ["큐웬", "qwen"], ["퀜", "qwen"], ["라마", "llama"], ["미스트랄", "mistral"], ["키미", "kimi"],
+    ["오퍼스", "opus"], ["소넷", "sonnet"], ["하이쿠", "haiku"], ["페이블", "fable"], ["플래시", "flash"], ["라이트", "lite"],
+    ["아스트라", "astra"], ["루나", "luna"], ["테라", "terra"], ["솔", "sol"], ["미니맥스", "minimax"], ["미니", "mini"], ["나노", "nano"],
+    ["프로", "pro"], ["뮤즈", "muse"], ["스파크", "spark"], ["미모", "mimo"], ["샤오미", "xiaomi"], ["메타", "meta"], ["구글", "google"],
+    ["오픈에이아이", "openai"], ["앤트로픽", "anthropic"], ["엔트로픽", "anthropic"], ["알리바바", "alibaba"], ["엔비디아", "nvidia"],
+    ["지엘엠", "glm"], ["문샷", "moonshot"], ["아마존", "amazon"], ["노바", "nova"],
+  ];
+  const compact = (t) => t.replace(/[\s\-_.·]/g, "");
+  function searchTerms() {
+    return S.search.split(/[,，、;]/).map((t) => {
+      let r = t.trim().toLowerCase();
+      for (const [ko, en] of KO_ALIAS) r = r.split(ko).join(" " + en + " ");
+      return r.trim().replace(/\s+/g, " ");
+    }).filter(Boolean);
+  }
+  function matchSearch(M, terms) {
+    const hay = (M.name + " " + M.key + " " + M.company).toLowerCase();
+    const hayC = compact(hay);
+    return terms.some((t) => t.split(" ").every((w) => hay.includes(w)) || hayC.includes(compact(t)));
+  }
+
   // ───────── 필터
   function applyFilters(all) {
     const cutoff = S.period ? monthsAgo(S.period) : null;
-    const q = S.search.trim().toLowerCase();
+    const terms = searchTerms();
+    const q = terms.length > 0;
     let list = all.filter((M) => {
-      if (q) return (M.name + " " + M.key + " " + M.company).toLowerCase().includes(q);   // 검색은 숨긴 회사도 찾음
+      if (q) return matchSearch(M, terms);   // 검색은 숨긴 회사·기간 밖 모델도 찾음
       if (S.hidden.includes(groupOf(M.company))) return false;
       if (cutoff && (!M.date || M.date < cutoff)) return false;
       return true;
@@ -316,6 +344,7 @@
   const isNarrow = () => chartEl.clientWidth < 560;
   let renderedNarrow = null, resizeTimer = null, VIEW = null;
   let FR = { front: [], status: new Map(), k: 0, levelAt: () => -Infinity };
+  let hoverCo = null;   // 위 회사 버튼에 마우스를 올린 회사 → 그래프에서 그 회사만 강조
   function onChartResize() {
     chart.resize();
     clearTimeout(resizeTimer);
@@ -397,7 +426,8 @@
       const col = colorOf(M.company);
       const sym = styleOf(M.company).sym;
       const pinned = pinSet.has(M.key);
-      const dim = anyPin && !pinned;
+      const hl = hoverCo != null && groupOf(M.company) === hoverCo;   // 회사 버튼에 마우스를 올려 강조 중
+      const dim = (anyPin && !pinned) || (hoverCo != null && !hl);
       const shown = M.vs.filter((z) => xOf(z) != null);
       const topV = shown.reduce((a, b) => (b.score > a.score ? b : a), { score: -1 });
       const data = shown.map((v) => {
@@ -422,7 +452,7 @@
             show: true, position: sidePos(x), distance: 7,
             formatter: isTop ? `${M.name} · ${v.eff}` : v.eff,
             color: isTop ? txt : txt2, fontSize: isTop ? 12.5 : 10.5, fontWeight: isTop ? 700 : 500, fontFamily: font, textBorderColor: halo, textBorderWidth: 3,
-          } : isTop && labelled.has(M.key) && !dim ? {
+          } : isTop && (labelled.has(M.key) || hl) && !dim ? {
             show: true, position: sidePos(x), distance: narrow ? 4 : 7,
             formatter: M.name, color: txt2, fontSize: narrow ? 10.5 : 11.5, fontWeight: 500, fontFamily: font, textBorderColor: halo, textBorderWidth: 3,
           } : { show: false },
@@ -439,12 +469,12 @@
       if (!data.length) continue;
       series.push({
         name: M.name, id: M.key, type: "line", data, showSymbol: true, triggerLineEvent: true,
-        lineStyle: { width: pinned ? 2 : 1.2, color: col, opacity: pinned ? 0.6 : dim ? 0.05 : 0.3, cap: "round", join: "round" },
+        lineStyle: { width: pinned || hl ? 2 : 1.2, color: col, opacity: pinned || hl ? 0.65 : dim ? 0.05 : 0.3, cap: "round", join: "round" },
         itemStyle: { color: col },
         emphasis: { focus: "series", lineStyle: { width: 2, opacity: 0.75 } },
         blur: { lineStyle: { opacity: 0.06 }, itemStyle: { opacity: 0.14 }, label: { opacity: 0.2 } },
         labelLayout: pinned ? { hideOverlap: false } : { hideOverlap: true },
-        z: pinned ? 6 : dim ? 1 : 3,
+        z: pinned ? 6 : hl ? 5 : dim ? 1 : 3,
         animationDuration: 550, animationEasing: "cubicOut",
       });
     }
@@ -920,8 +950,19 @@
       const n = document.createElement("span"); n.className = "cnt"; n.textContent = cnt[g] || 0;
       chip.append(t, n);
       chip.onclick = () => { S.hidden = S.hidden.includes(g) ? S.hidden.filter((x) => x !== g) : [...S.hidden, g]; save(); render(); };
+      chip.onmouseenter = () => setHoverCo(g);
+      chip.onmouseleave = () => setHoverCo(null);
       el.append(chip);
     }
+    el.onmouseleave = () => setHoverCo(null);
+  }
+  // 강조할 회사가 바뀌면 그래프만 움직임 없이 바로 다시 그림
+  function setHoverCo(g) {
+    if (hoverCo === g || !VIEW) return;
+    hoverCo = g;
+    quietRender = true;
+    renderChart(VIEW.list, VIEW.points);
+    quietRender = false;
   }
 
   // ───────── 첫 화면 추천 카드 (최고 성능 / 가성비 추천)
@@ -1149,7 +1190,6 @@
   const syncSegs = () => $$(".seg").forEach(moveThumb);
   initSeg("xAxisSeg", "x", (v) => v);
   initSeg("periodSeg", "period", (v) => +v);
-  initSeg("diffSeg", "difficulty", (v) => v);
 
   // 드롭다운 메뉴
   function bindMenu(id) {
@@ -1181,9 +1221,7 @@
 
   function syncControls() {
     const on = (id, v) => $$(`#${id} button`).forEach((b) => b.classList.toggle("on", b.dataset.v === String(v)));
-    on("xAxisSeg", S.x); on("periodSeg", S.period); on("diffSeg", S.difficulty);
-    $("#diffCtl").style.opacity = S.x === "costok" ? "1" : "0.55";
-    $("#diffCtl").title = S.x === "costok" ? "" : "난이도는 '맞힌 문제당' 비용과 표의 정답률에 반영돼요";
+    on("xAxisSeg", S.x); on("periodSeg", S.period);
     $("#perCoText").textContent = S.perCo ? `${S.perCo}개` : "전부";
     $$("#perCoMenu .menu-item").forEach((b) => b.classList.toggle("on", +b.dataset.v === S.perCo));
     for (const [id, prop] of Object.entries(opts)) $("#" + id).checked = !!S[prop];
