@@ -373,7 +373,10 @@
       x0 = a - pad; x1 = b + pad;
     } else {
       const lo = xs.length ? Math.min(...xs) : 0.01, hi = xs.length ? Math.max(...xs, isCostAxis() ? 10 ** S.budget : 0) : 1;
-      x0 = 10 ** Math.floor(Math.log10(lo) - 0.05); x1 = 10 ** Math.ceil(Math.log10(hi) + 0.05);
+      // 점이 있는 범위에 딱 맞추고 양쪽에 조금만 여유 (10배 단위로 반올림하면 빈 공간이 크게 생김)
+      const a = Math.log10(lo), b = Math.log10(hi);
+      const pad = Math.max(0.06, (b - a) * 0.03);
+      x0 = 10 ** (a - pad); x1 = 10 ** (b + pad);
     }
     FULL = { x0, x1, y0, y1 };
     if (viewKind !== S.x) { VIEWBOX = null; viewKind = S.x; }
@@ -401,7 +404,7 @@
     chart.setOption({
       backgroundColor: "transparent",
       textStyle: { fontFamily: "Pretendard Variable, Pretendard, Malgun Gothic, sans-serif" },
-      grid: { left: 52, right: 150, top: 20, bottom: 48 },
+      grid: { left: 52, right: 128, top: 20, bottom: 48 },
       xAxis: Object.assign(xAxis, { name: "", nameLocation: "middle" }),
       yAxis: {
         type: "value", min: V.y0, max: V.y1,
@@ -469,7 +472,7 @@
     const a = Math.log10(V.x0), b = Math.log10(V.x1), span = b - a;
     let vals = [];
     if (span > 0.6) {
-      const mult = span > 2.5 ? [1] : span > 1.2 ? [1, 3] : [1, 2, 5];
+      const mult = span > 4.5 ? [1] : span > 1.5 ? [1, 3] : [1, 2, 5];
       for (let k = Math.floor(a) - 1; k <= Math.ceil(b) + 1; k++) {
         for (const m of mult) {
           const v = m * 10 ** k;
