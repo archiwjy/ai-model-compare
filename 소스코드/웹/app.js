@@ -88,8 +88,19 @@
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  let colorCache = {};
+  let colorCache = {}, mutedCache = {};
   const colorOf = (co) => colorCache[co] || (colorCache[co] = css(styleOf(co).c));
+  // 은은한 회사 색: 회사 색을 회색(점 색)과 섞음 → 평소엔 차분하게, 그래도 같은 회사끼리는 한눈에 묶여 보임
+  //  (마우스를 올리거나 고정하면 원래의 또렷한 색)
+  const MUTE = 0.6;   // 회사 색 비율 (1 = 원래 색, 0 = 회색)
+  function mixHex(a, b, t) {
+    const p = (h) => { h = String(h).trim().replace("#", ""); if (h.length === 3) h = h.replace(/./g, "$&$&"); const n = parseInt(h, 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+    const x = p(a), y = p(b);
+    if (x.some(isNaN) || y.some(isNaN)) return a;
+    return "#" + x.map((v, i) => Math.round(v * t + y[i] * (1 - t)).toString(16).padStart(2, "0")).join("");
+  }
+  const muteColor = (c) => mixHex(c, css("--dot"), MUTE);
+  const mutedOf = (co) => mutedCache[co] || (mutedCache[co] = muteColor(colorOf(co)));
   const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
   function fmtCost(c) {
     if (c == null) return "—";
@@ -507,7 +518,7 @@
     const fresh = all.filter((M) => M.date && daysSince(M.date) <= 30).sort((a, b) => b.date.localeCompare(a.date) || b.best.score - a.best.score).slice(0, 24);
     if (!fresh.length) { el.hidden = true; return; }
     const item = (M, dup) => `<button type="button" class="tk-item" data-key="${esc(M.key)}"${dup ? ' tabindex="-1" aria-hidden="true"' : ""}>` +
-      `<span class="sym">${symbolSvg(styleOf(M.company).sym)}</span><b>${esc(M.name)}</b>` +
+      `<span class="sym">${symbolSvg(styleOf(M.company).sym, mutedOf(M.company))}</span><b>${esc(M.name)}</b>` +
       `<span class="tk-meta">${esc(M.date.slice(5).replace("-", "."))} · ${M.best.score.toFixed(1)}</span></button>`;
     el.innerHTML = `<span class="tk-label"><i></i>최근 30일 새 모델 <b>${fresh.length}</b></span>` +
       `<div class="tk-track"><div class="tk-move" style="--dur:${Math.max(40, fresh.length * 5)}s">${fresh.map((M) => item(M)).join("")}${fresh.map((M) => item(M, true)).join("")}</div></div>`;
@@ -586,7 +597,6 @@
     renderedNarrow = isNarrow();
     // 경계선 색 = 신호색(연두). 이 색은 경계선·가성비에만 쓴다
     const txt = css("--text"), txt2 = css("--text-2"), muted = css("--muted"), grid = css("--grid"), axis = css("--axis"), ink = css("--acc");
-    const dotC = css("--dot"), dotLine = css("--dot-line");   // 평소 점·선은 흑백 — 회사 색은 '지금 보고 있는 것'(마우스·고정)에만
     const font = "Pretendard Variable, Pretendard, Malgun Gothic, sans-serif";
     const mono = "JetBrains Mono, Pretendard Variable, Pretendard, Consolas, monospace";   // 눈금 숫자는 계기판처럼 고정폭
     const narrow = isNarrow();
@@ -668,7 +678,8 @@
       const hl = hoverCo != null && groupOf(M.company) === hoverCo;   // 회사 버튼에 마우스를 올려 강조 중
       const dim = (anyPin && !pinned) || (hoverCo != null && !hl);
       const focus = pinned || hl;               // 지금 보고 있는 모델만 회사 색, 나머지는 흑백
-      const col = focus ? coCol : dotC;
+      const soft = mutedOf(M.company);          // 평소: 은은한 회사 색 (같은 회사끼리 묶여 보이게)
+      const col = focus ? coCol : soft;
       const shown = M.vs.filter((z) => xOf(z) != null);
       const topV = shown.reduce((a, b) => (b.score > a.score ? b : a), { score: -1 });
       const data = shown.map((v) => {
@@ -685,7 +696,7 @@
           symbolSize: base + (pinned ? 3 : 0) + (fr ? 3 : nr ? 2 : 0),
           itemStyle: Object.assign(
             hollow ? { color: surf, borderColor: col, borderWidth: 2 }
-              : fr ? { color: focus ? coCol : txt, borderColor: ink, borderWidth: 2 }   // 경계선 위 점: 흰 점 + 연두 테두리
+              : fr ? { color: col, borderColor: ink, borderWidth: 2 }   // 경계선 위 점: 회사 색 + 연두 테두리
               : nr ? { color: col, borderColor: ink, borderWidth: 1.4, borderType: [2, 2] }
               : { color: col, borderColor: surf, borderWidth: 1.5 },
             { opacity: dim ? 0.14 : 1 }),
@@ -707,7 +718,7 @@
       if (!data.length) continue;
       series.push({
         name: M.name, id: M.key, type: "line", data, showSymbol: true, triggerLineEvent: true,
-        lineStyle: { width: focus ? 2 : 1.1, color: focus ? coCol : dotLine, opacity: focus ? 0.7 : dim ? 0.3 : 1, cap: "round", join: "round" },
+        lineStyle: { width: focus ? 2 : 1.2, color: focus ? coCol : soft, opacity: focus ? 0.7 : dim ? 0.08 : 0.42, cap: "round", join: "round" },
         itemStyle: { color: col },
         emphasis: { focus: "series", lineStyle: { width: 2, opacity: 0.85, color: coCol } },
         blur: { lineStyle: { opacity: 0.06 }, itemStyle: { opacity: 0.14 }, label: { opacity: 0.2 } },
@@ -1297,7 +1308,8 @@
         + (found ? "숫자 = 검색에 맞는 모델 수" + NL : "") + (S.hidden.includes(g) ? "눌러서 보이기" : "눌러서 숨기기");
       if (found && S.hidden.includes(g) && cnt[g]) chip.classList.add("has-hit");   // 꺼 둔 회사에 검색 결과가 있으면 숫자를 눈에 띄게
       chip.innerHTML = symbolSvg(st.sym);
-      chip.style.setProperty("--co", css(st.c));   // 마우스를 올렸을 때만 회사 색
+      chip.style.setProperty("--co", css(st.c));                // 마우스를 올리면 또렷한 회사 색
+      chip.style.setProperty("--cm", muteColor(css(st.c)));     // 평소엔 은은한 회사 색
       const t = document.createElement("span"); t.textContent = g;
       const n = document.createElement("span"); n.className = "cnt"; n.textContent = cnt[g] || 0;
       chip.append(t, n);
@@ -1516,7 +1528,7 @@
       const pct = sMax > sMin ? ((v.score - sMin) / (sMax - sMin)) * 100 : 100;
       tr.innerHTML =
         `<td class="c-rank">${v.rank}</td>` +
-        `<td class="c-name"><span class="mname"><span class="sym">${symbolSvg(styleOf(v.m.company).sym)}</span>${esc(v.m.name)}</span> ${daysSince(v.m.date) <= 30 ? '<span class="badge new">NEW</span>' : ""}<span class="m-eff"><b>${esc(v.eff)}</b>${v.isDefault ? " · 기본값" : ""}</span></td>` +
+        `<td class="c-name"><span class="mname"><span class="sym">${symbolSvg(styleOf(v.m.company).sym, mutedOf(v.m.company))}</span>${esc(v.m.name)}</span> ${daysSince(v.m.date) <= 30 ? '<span class="badge new">NEW</span>' : ""}<span class="m-eff"><b>${esc(v.eff)}</b>${v.isDefault ? " · 기본값" : ""}</span></td>` +
         `<td class="effc c-eff"><b>${esc(v.eff)}</b>${v.effKo && v.effort !== "none" ? `<span class="ko">${esc(v.effKo)}</span>` : ""}${v.isDefault ? ' <span class="badge def">기본값</span>' : ""}${!canSelect(v.m, v.effort) ? ' <span class="badge est">선택 불가</span>' : ""}</td>` +
         `<td class="num c-score"><span class="scorec"><span class="bar"><i style="width:${Math.max(4, pct).toFixed(0)}%"></i></span><b>${v.score.toFixed(1)}</b></span><span class="sub2">±${v.se.toFixed(1)}<span class="conf-x"> · 신뢰도 <span class="badge ${c.k}">${c.t}</span></span></span></td>` +
         `<td class="num c-cost">${fmtCost(v.cost)}${v.costKind && v.costKind !== "측정" ? `<span class="sub2">${esc(v.costKind === "가격 추정" ? "가격표로 추정" : "등급 환산")}</span>` : ""}</td>` +
@@ -1735,7 +1747,7 @@
       S.theme = cur === "dark" ? "light" : "dark";
       document.documentElement.dataset.theme = S.theme;
       document.querySelector('meta[name="theme-color"]').content = S.theme === "light" ? "#f4f3ee" : "#0a0b0d";
-      colorCache = {}; save(); render();
+      colorCache = {}; mutedCache = {}; save(); render();
     };
     // 누른 자리에서 새 색이 원으로 퍼지며 바뀜 (지원 안 되는 브라우저는 바로 바뀜)
     if (!document.startViewTransition || REDUCED) return flip();

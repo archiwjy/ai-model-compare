@@ -7,7 +7,8 @@
      답(최고 성능 · 가성비 추천)은 지도 위 설명표로 띄워 점과 선으로 잇는다.
    · 색은 과감하게 덜어 냄 — 강한 색은 딱 두 곳:
        ① 가성비 경계선(연두)  ② 가성비 추천 1위(연두 바탕)
-     회사 색은 '지금 보고 있는 것'(마우스를 올리거나 고정한 모델)에만. 나머지는 모두 흑백.
+     회사 색은 평소 은은하게(회색과 섞음 — 같은 회사끼리 묶여 보일 만큼), 마우스·고정하면 또렷하게.
+     나머지(버튼·뱃지·글자)는 모두 흑백.
    · 조절은 화면 아래 가운데 떠 있는 명령 막대 하나 (태블릿·휴대폰은 [검색][조절] + 올라오는 판).
 
    화면 크기별 배치
@@ -50,7 +51,7 @@
   --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 28px 60px -34px rgba(0, 0, 0, 0.85);
   --shadow-float: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 26px 60px -20px rgba(0, 0, 0, 0.9);
   --radius: 16px;
-  /* 회사 색 (지금 보고 있는 것에만) */
+  /* 회사 색 (평소엔 회색과 섞어 은은하게, 보고 있는 것만 또렷하게) */
   --c1: #6f9dff; --c2: #ff8a5c; --c3: #3ccfe0; --c4: #ff7db6;
   --c5: #ff7db6; --c6: #7ad48a; --c7: #b39cff; --c8: #ff5d5d; --c0: #8e949c;
   --sans: "Pretendard Variable", Pretendard, "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
@@ -249,7 +250,7 @@ kbd { font: 600 10.5px/1 var(--mono); padding: 2px 5px; border-radius: 4px; bord
   border: 1px solid transparent; background: transparent; font-size: 12.5px; font-weight: 600; color: var(--text-2);
   cursor: pointer; user-select: none; transition: color .2s, border-color .2s, background .2s, opacity .2s, transform .25s var(--spring);
 }
-.chip svg { width: 10px; height: 10px; stroke: none; fill: var(--dot); transition: fill .2s, transform .3s var(--spring); }
+.chip svg { width: 10px; height: 10px; stroke: none; fill: var(--cm, var(--dot)); transition: fill .2s, transform .3s var(--spring); }
 .chip:hover { color: var(--text); background: var(--ink-soft); }
 .chip:hover svg { fill: var(--co, var(--dot)); transform: scale(1.3); }
 .chip:active { transform: scale(.95); }
@@ -678,7 +679,7 @@ kbd { font: 600 10.5px/1 var(--mono); padding: 2px 5px; border-radius: 4px; bord
 .k-band { width: 20px; height: 10px; background: var(--acc-soft); border-top: 2px solid var(--acc); }
 .k-near { width: 10px; height: 10px; border-radius: 50%; border: 1.5px dashed var(--acc); }
 .k-hollow { width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--dot); }
-.k-co { width: 10px; height: 10px; border-radius: 50%; background: conic-gradient(var(--c1) 0 25%, var(--c2) 0 50%, var(--c3) 0 75%, var(--c7) 0); }
+.k-co { width: 10px; height: 10px; border-radius: 50%; background: conic-gradient(var(--c1) 0 25%, var(--c2) 0 50%, var(--c3) 0 75%, var(--c7) 0); opacity: .75; }
 @media (max-width: 700px) {
   .ticker { margin: 18px -14px 0; padding-left: 14px; height: 44px; border-top: 1px solid var(--line-2); }
   .read-keys { gap: 6px 16px; }
