@@ -374,6 +374,37 @@ class BatFiles(unittest.TestCase):
                 self.assertEqual(b.count(b"\n"), b.count(b"\r\n"), "CRLF 가 아닌 줄이 있음")
 
 
+class SecretAddress(unittest.TestCase):
+    """비밀 폴더 주소가 바깥으로 새지 않게 하는 장치들이 그대로 있는지"""
+
+    def workflow(self):
+        d = os.path.join(testutil.SRC, "사이트_설정")
+        if not os.path.isdir(d):
+            d = os.path.join(os.path.dirname(testutil.SRC), ".github", "workflows")
+        with open(os.path.join(d, "update.yml"), encoding="utf-8") as f:
+            return f.read()
+
+    def test_workflow_hides_and_deletes_the_site_bundle(self):
+        y = self.workflow()
+        self.assertIn("::add-mask::ai-", y)                                  # 실행 기록에서 폴더 이름 가리기
+        self.assertNotIn("upload-pages-artifact", y)                         # 파일 목록을 기록에 찍는 묶기 도구 금지
+        self.assertNotRegex(y, r"tar [^\n]*-[a-z]*v")                         # tar 의 v(목록 출력) 금지
+        self.assertIn("남은 사이트 묶음 정리", y)                              # 지난 실행이 남긴 묶음 정리
+        m = re.search(r"- name: 사이트 묶음 지우기\s*\n\s*if: (\S+)", y)
+        self.assertTrue(m and m.group(1) == "always()", "배포가 실패해도 묶음을 지워야 함")
+
+    def test_page_sends_no_referrer(self):
+        with open(os.path.join(testutil.WEB, "index.html"), encoding="utf-8") as f:
+            html = f.read()
+        self.assertRegex(html, r'<meta name="referrer" content="no-referrer">')
+        with open(os.path.join(testutil.WEB, "app.js"), encoding="utf-8") as f:
+            js = f.read()
+        for src in (html, js):
+            for tag in re.findall(r'<a [^>]*target="_blank"[^>]*>', src):
+                with self.subTest(tag=tag[:80]):
+                    self.assertIn("noreferrer", tag)
+
+
 class Workflows(unittest.TestCase):
     def test_yaml_files_exist_and_name_scripts(self):
         d = os.path.join(testutil.SRC, "사이트_설정")

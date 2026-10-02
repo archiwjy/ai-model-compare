@@ -41,6 +41,14 @@ jobs:
           SITE_SECRET: ${{ secrets.SITE_SECRET }}
         run: |
           python3 -c "import os,hashlib; k=(os.environ.get('SITE_SECRET') or os.environ.get('AA_API_KEY') or '').strip(); k and print('::add-mask::ai-'+hashlib.sha256(('site:'+k).encode()).hexdigest()[:20])"
+      # 지난 실행이 취소·실패로 남긴 사이트 묶음이 있으면 지움 (묶음 안 경로에 비밀 폴더 이름이 들어 있음)
+      - name: 남은 사이트 묶음 정리
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for id in $(gh api "repos/${{ github.repository }}/actions/artifacts?name=github-pages&per_page=100" --jq '.artifacts[].id'); do
+            gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" && echo "지난 실행의 사이트 묶음을 지웠어요"
+          done
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
@@ -99,10 +107,11 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v5
-      # 배포가 끝난 묶음은 바로 지움 (공개 저장소에선 로그인한 누구나 내려받을 수 있어서)
-      # 배포가 실패하면 남겨 둠 → 'Re-run failed jobs' 로 배포만 다시 할 수 있게 (하루 뒤 자동으로 사라짐)
+      # 배포가 끝나면 성공·실패와 상관없이 묶음을 바로 지움
+      # (공개 저장소에선 로그인한 누구나 내려받을 수 있고, 묶음 안 경로에 비밀 폴더 이름이 들어 있어서)
+      # 배포가 실패했으면 'Re-run all jobs' 로 처음부터 다시 돌리면 됨 (기관 원본은 캐시에서 다시 씀)
       - name: 사이트 묶음 지우기
-        if: success()
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

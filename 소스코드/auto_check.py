@@ -83,7 +83,7 @@ def find_problems():
         out.append("사이트 만들기 작업이 점검 전에 멈췄어요 (준비 단계 실패). 사이트는 이전 화면을 그대로 보여 주고 있어요. "
                    "실행 기록을 확인하고 'Re-run all jobs' 로 다시 돌려 보세요.")
     if os.environ.get("DEPLOY_RESULT") == "failure":
-        out.append("사이트 올리기(GitHub Pages 배포)가 실패했어요. 저장소 설정 → Pages 를 확인한 뒤 'Re-run failed jobs' 로 다시 돌려 보세요.")
+        out.append("사이트 올리기(GitHub Pages 배포)가 실패했어요. 저장소 설정 → Pages 를 확인한 뒤 'Re-run all jobs' 로 다시 돌려 보세요.")
     if "--덧붙이기" in sys.argv:
         return out
     d = _load_data()

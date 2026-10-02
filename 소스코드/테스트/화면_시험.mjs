@@ -267,6 +267,11 @@ class Tab {
     await this.send("Input.dispatchMouseEvent", Object.assign({ type, x, y, button: "left", clickCount: 1 }, extra));
   }
   async click(x, y) { await this.mouse("mouseMoved", x, y, { button: "none" }); await this.mouse("mousePressed", x, y); await this.mouse("mouseReleased", x, y); }
+  // 손가락으로 한 번 누르기 (휴대폰 흉내에서 실제 터치 → 초점·클릭이 브라우저가 하는 그대로 생김)
+  async tap(x, y) {
+    await this.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    await this.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  }
   async wheel(x, y, dy) { await this.send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY: dy }); }
   async key(key) {
     const codes = { Tab: 9, Enter: 13, Escape: 27, " ": 32, "/": 191, ArrowDown: 40, ArrowUp: 38 };
@@ -752,15 +757,10 @@ const TESTS = [
         log.rowPinned = qa("#pinBar .pin").length === 1 && !q("#detail").classList.contains("open");   // 표 줄 = 고정만
         // 상세 판은 아래에서 올라오는 움직임이 있음 → 고정 시간 대신 '화면 안에 들어올 때까지' 최대 3초 기다림 (느린 컴퓨터에서도 같은 결과)
         const until = async (fn, ms = 3000) => { const t0 = performance.now(); while (performance.now() - t0 < ms) { if (fn()) return true; await w(50); } return fn(); };
-        const row = q(".pick .vt-row");
-        row.focus(); row.click();          // 터치하면 초점도 그 줄로 감 (초점이 왔다고 말풍선을 띄우면 안 됨)
+        q(".pick .vt-row").click();        // (실제 터치로 누르는 시험은 '휴대폰 카드 줄 터치' 장면에서)
         const det = q("#detail");
         log.detailInView = await until(() => { const dr = det.getBoundingClientRect(); return det.classList.contains("open") && dr.top < innerHeight - 40 && dr.bottom > 0; });
         log.detail = det.classList.contains("open");
-        // 그래프 말풍선: 그래프 도구가 상자를 미리 만들어 두므로 '글이 들어 있고 보이는지'로 판단
-        const tipShown = () => { const tip = q("#chart .chart-tip"); if (!tip || !tip.innerText.trim()) return false; const cs = getComputedStyle(tip); return cs.display !== "none" && cs.visibility !== "hidden" && +cs.opacity > 0; };
-        await w(400);
-        log.noTip = !tipShown();
         // 작은 터치 대상 (44px 미만인 주요 버튼 — 열린 상세의 닫기·고정 칩 × 포함)
         const sizes = (sel) => qa(sel).filter((b) => b.offsetParent).map((b) => { const r2 = b.getBoundingClientRect(); return { id: b.id || b.className || b.tagName, w: Math.round(r2.width), h: Math.round(r2.height) }; });
         log.small = sizes(".circ, .cbtn, .dock-toggle, #closeDetail, .pin .x, .pin-name").filter((x) => x.w < 44 || x.h < 44);
@@ -772,9 +772,33 @@ const TESTS = [
       ok(r.open && r.cost && r.closed, "조절 판 열고 닫기", JSON.stringify(r));
       ok(r.rowPinned, "표 줄 → 고정만 (상세가 표를 덮지 않음)", JSON.stringify(r));
       ok(r.detail && r.detailInView, "카드 줄 → 상세 판", JSON.stringify(r));
-      ok(r.noTip, "터치로 연 상세에는 그래프 말풍선이 같이 뜨지 않음", JSON.stringify(r));
       ok(!r.small.length && !r.smallMore.length, "누르는 곳 터치 크기 44px 이상", JSON.stringify([r.small, r.smallMore]));
       await t.shot("phone");
+    },
+  },
+  {
+    name: "휴대폰 카드 줄 터치 → 상세 · 말풍선이 같이 뜨지 않음",
+    fx: "real", vp: PHONE,
+    async run(t, ok) {
+      const p = await t.eval(async () => {
+        const r = document.querySelector('.pick[data-kind="value"] .vt-row');
+        r.scrollIntoView({ block: "center", behavior: "instant" });
+        await new Promise((res) => setTimeout(res, 300));
+        const b = r.getBoundingClientRect();
+        return { x: Math.round(b.left + Math.min(60, b.width / 2)), y: Math.round(b.top + b.height / 2) };
+      });
+      await t.tap(p.x, p.y);
+      // 말풍선은 터치 직후·다시 그린 뒤 어느 때든 뜨면 안 됨 → 1초 동안 계속 살핌
+      const r = await t.eval(async () => {
+        const q = (s) => document.querySelector(s);
+        const shown = () => { const tip = q("#chart .chart-tip"); if (!tip || !tip.innerText.trim()) return false; const cs = getComputedStyle(tip); return cs.display !== "none" && cs.visibility !== "hidden" && +cs.opacity > 0; };
+        let ever = false;
+        for (let i = 0; i < 20; i++) { if (shown()) ever = true; await new Promise((res) => setTimeout(res, 50)); }
+        const a = document.activeElement;
+        return { detail: q("#detail").classList.contains("open"), ever, focus: a ? a.className : null };
+      });
+      ok(r.detail, "터치 → 상세 열림", JSON.stringify(r));
+      ok(!r.ever, "터치로 연 상세에는 그래프 말풍선이 뜨지 않음", JSON.stringify(r));
     },
   },
   {

@@ -1433,10 +1433,10 @@
   function renderFooter() {
     const src = SRC_ORDER.filter((s) => D.sources[s] && D.sources[s].ok).map((s) => {
       const I = D.sources[s];
-      const name = I.url ? `<a href="${esc(I.url)}" target="_blank" rel="noopener">${esc(I.name)}</a>` : esc(I.name);
+      const name = I.url ? `<a href="${esc(I.url)}" target="_blank" rel="noopener noreferrer">${esc(I.name)}</a>` : esc(I.name);
       return `<div class="src"><b>${name}</b> — ${esc(I.desc)} <span class="muted">(${esc(I.updated || "")})</span></div>`;
     }).join("");
-    $("#foot").innerHTML = `<div class="srcs">${src}</div><div>가격: <a href="https://openrouter.ai/models" target="_blank" rel="noopener">OpenRouter</a> · 비용 기록: LiveBench·DeepSWE·CursorBench·ARC-AGI 등</div>` +
+    $("#foot").innerHTML = `<div class="srcs">${src}</div><div>가격: <a href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer">OpenRouter</a> · 비용 기록: LiveBench·DeepSWE·CursorBench·ARC-AGI 등</div>` +
       `<div class="fine">Epoch AI 데이터는 CC-BY 4.0 (Epoch AI, "Capabilities & benchmarking", epoch.ai). 지능 지수 출처: Artificial Analysis (artificialanalysis.ai). ` +
       `이 페이지의 점수는 두 기관의 공개 결과를 자체 방식으로 합친 것이며 기관의 공식 순위가 아닙니다. 마지막 갱신 ${esc(D.generated || "알 수 없음")} (한국 시간)</div>`;
   }
