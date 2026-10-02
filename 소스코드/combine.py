@@ -49,6 +49,12 @@ def _fit_one(obs, prior=None, lam=0.0):
     return c, h, resid
 
 
+def enough_benchmarks(n, has_prior):
+    """벤치마크 수가 능력치를 믿을 만큼인지 (같은 모델의 공식 점수가 없으면 하나 더 필요)
+    collect 가 '합치면 지워질 점이 있는지' 볼 때도 같은 기준을 씀"""
+    return n >= 3 and (has_prior or n >= 4)
+
+
 def epoch_capability(ep):
     """Epoch 원본 점수 → 등급별 능력치 {key: (점수, 표준오차, 벤치마크수)}"""
     edi, info = ep["edi"], ep["info"]
@@ -79,7 +85,7 @@ def epoch_capability(ep):
         e = info.get(key[0], {}).get("eci")
         prior = e + delta.get(key[1], 0.0) if e is not None else None
         # 벤치마크가 너무 적으면 믿기 어려우므로 뺀다
-        if len(o) < 3 or (prior is None and len(o) < 4):
+        if not enough_benchmarks(len(o), prior is not None):
             continue
         c, h, _ = _fit_one(o, prior, lam if prior is not None else 0.0)
         se = min(15.0, math.sqrt(sigma2 / max(h, 1e-9)))
@@ -251,6 +257,9 @@ def consensus_scores(src):
     return mapped, info
 
 
+MAX_ITER = 2000       # 비용 환산 비율을 맞추는 최대 반복 횟수
+
+
 def combine_costs(cost_src, ref="LiveBench", anchor=None):
     """비용 출처들을 기준 출처(LiveBench 문제 1개) 단위로 환산해 합친다 (로그 평균).
     · 기준 출처가 오늘 비어 있으면, 지난번 환산 비율(anchor = {출처: 비율})로 같은 단위를 유지한다
@@ -284,7 +293,10 @@ def combine_costs(cost_src, ref="LiveBench", anchor=None):
                 cons.setdefault(k, []).append((s, v + off[s]))
         return cons
 
-    for _ in range(200):     # 바뀜이 거의 없을 때까지 (보통 수십 번)
+    # 바뀜이 거의 없을 때까지 반복. 서로 맞물린 출처끼리 값이 오락가락하지 않게 절반씩만 고친다
+    #  (예전엔 통째로 바꿔서 기준 출처가 빠진 날 200번을 다 돌아도 두 값 사이를 오갔음)
+    converged = False
+    for _ in range(MAX_ITER):
         cons = consensus()
         change = 0.0
         for s, d in logs.items():
@@ -297,11 +309,19 @@ def combine_costs(cost_src, ref="LiveBench", anchor=None):
                     diffs.append(sum(others) / len(others) - v)
             if len(diffs) >= 3:
                 new = statistics.median(diffs)
-                change = max(change, abs(new - off.get(s, new + 1)))
+                old = off.get(s)
+                if old is None:
+                    change = math.inf           # 처음 들어온 출처 → 한 번 더 돌아야 함
+                else:
+                    new = 0.5 * old + 0.5 * new
+                    change = max(change, abs(new - old))
                 off[s] = new
                 n_used[s] = len(diffs)
         if change < 1e-9:
+            converged = True
             break
+    if not converged:
+        print(f"  ! 비용 환산 비율이 {MAX_ITER}번 안에 다 맞춰지지 않아 마지막 값을 씀 (출처끼리 비용이 크게 어긋남)", flush=True)
     cons = consensus()           # 마지막 비율로 한 번 더 → 합친 값과 표시하는 비율이 같은 계산에서 나옴
     merged = {k: (sum(x for _, x in v) / len(v), sorted({s for s, _ in v})) for k, v in cons.items()}
     info = {}
@@ -309,6 +329,8 @@ def combine_costs(cost_src, ref="LiveBench", anchor=None):
         info[s] = {"n": len(logs[s]) if s in fixed else n_used.get(s, 0), "factor": round(math.exp(o), 4)}
         if s in fixed:
             info[s]["ref"] = True
+        elif not converged:
+            info[s]["converged"] = False      # 자동 점검·화면에서 '비율이 덜 맞춰짐'을 알 수 있게
     return merged, info
 
 
@@ -338,23 +360,26 @@ def _monotone(lad, counts):
     return out
 
 
-def _components(by_base, efforts):
-    """같은 모델 안에 함께 나오는 등급끼리 이어진 묶음들 (서로 비교할 수 있는 등급끼리)"""
-    parent = {e: e for e in efforts}
+MIN_LINKS = 3        # 두 등급 묶음을 이으려면 둘 다 잰 모델이 이만큼은 있어야 함
 
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-    for d in by_base.values():
-        es = [e for e in d if e in parent]
-        for e2 in es[1:]:
-            parent[find(e2)] = find(es[0])
-    groups: dict[str, list] = {}
-    for e in efforts:
-        groups.setdefault(find(e), []).append(e)
-    return list(groups.values())
+
+def _components(by_base, efforts, min_links=MIN_LINKS):
+    """같은 모델 안에 함께 나오는 등급끼리 이어진 묶음들 (서로 비교할 수 있는 등급끼리)
+    · 두 묶음의 등급을 함께 잰 모델이 min_links 개 이상일 때만 잇는다
+      (예전엔 '추론 끔'과 '추론 켬'을 함께 잰 모델 하나가 '기본'·'추론 켬' 묶음 전체의 높이를 정해 배율이 0.6~3배로 흔들렸음)"""
+    comps = [{e} for e in efforts]
+    model_sets = [set(d) for d in by_base.values()]
+
+    def linked_pair():
+        """이을 수 있는 두 묶음 (없으면 None)"""
+        for i in range(len(comps)):
+            for j in range(i + 1, len(comps)):
+                if sum(1 for es in model_sets if es & comps[i] and es & comps[j]) >= min_links:
+                    return i, j
+        return None
+    while (pair := linked_pair()) is not None:
+        comps[pair[0]] |= comps.pop(pair[1])
+    return [[e for e in efforts if e in c] for c in comps]
 
 
 def effort_ladder(merged):
@@ -363,12 +388,14 @@ def effort_ladder(merged):
     · 자료가 적은 등급은 기본값 쪽으로 당김 (모델 수 기준)
     · 서로 비교할 수 있는 등급 묶음마다 높이를 정함: '높음'이 든 묶음은 높음 = 1배,
       '기본'·'추론 켬'처럼 따로 떨어진 묶음은 기본값의 평균 높이 (자료 없는 등급은 기본값 그대로)
+      두 묶음을 함께 잰 모델이 MIN_LINKS 개보다 적으면 따로 떨어진 묶음으로 봄 (모델 하나가 높이를 통째로 정하지 않게)
     · 명시 등급은 순서대로 비용이 줄지 않게 맞춤"""
     by_base: dict[str, dict] = {}
     for (b, e), (lv, _) in merged.items():
         by_base.setdefault(b, {})[e] = lv
     lad = dict(DEFAULT_EFFORT_LOG)
     comps = _components(by_base, list(lad))
+    comp_of = {e: i for i, comp in enumerate(comps) for e in comp}
     counts: dict[str, int] = {}
     models: dict[str, int] = {}
 
@@ -389,7 +416,8 @@ def effort_ladder(merged):
             nm = 0
             for d in by_base.values():
                 if e in d:
-                    got = [d[e] - l2 + lad[e2] for e2, l2 in d.items() if e2 != e and e2 in lad]
+                    # 이어지지 않은 묶음의 등급과는 비교하지 않음 (그 묶음의 높이는 따로 정해서, 섞으면 엉뚱한 높이가 들어감)
+                    got = [d[e] - l2 + lad[e2] for e2, l2 in d.items() if e2 != e and e2 in lad and comp_of[e2] == comp_of[e]]
                     if got:
                         nm += 1
                         vals += got

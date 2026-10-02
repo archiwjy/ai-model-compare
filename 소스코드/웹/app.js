@@ -9,8 +9,20 @@
   const HOSTED = location.protocol === "https:" && !/^(localhost|127\.)/.test(location.hostname);
   const escText = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+  // ───────── 화면 수명: 오류 화면(fatal)으로 바뀌면 전역 처리기·반복 작업·관찰자를 모두 멈춤 (없는 요소를 건드려 오류가 쌓이지 않게)
+  const LIFE = new AbortController();
+  const TIMERS = [], OBSERVERS = [];
+  let DEAD = false;
+  const listen = (target, type, fn, opts) => target.addEventListener(type, fn, Object.assign(typeof opts === "boolean" ? { capture: opts } : opts || {}, { signal: LIFE.signal }));
+  const every = (fn, ms) => { const id = setInterval(() => { if (!DEAD) fn(); }, ms); TIMERS.push(id); return id; };
+  const watch = (obs) => { OBSERVERS.push(obs); return obs; };
+
   // ───────── 그릴 수 없을 때: 하얀 화면 대신 무엇을 하면 되는지 안내
   function fatal(title, lines) {
+    DEAD = true;
+    LIFE.abort();
+    TIMERS.forEach((id) => clearInterval(id));
+    OBSERVERS.forEach((o) => o.disconnect());
     root.dataset.fatal = "fatal";
     const mark = '<svg class="mark" viewBox="0 0 40 40" aria-hidden="true"><path d="M5 33H13V24H21V15H29V7H36"/><circle cx="29" cy="3.5" r="3.5"/></svg>';
     document.body.innerHTML = `<main class="fatal" role="alert">${mark}<h1>${escText(title)}</h1>${lines.map((l) => `<p>${l}</p>`).join("")}` +
@@ -91,7 +103,7 @@
   let VIEW = null;                 // 마지막으로 그린 목록·점
   let FR = EMPTY_FR;               // 가성비 경계선 (추천 계산용 — 표시 여부와 상관없이 늘 계산)
   let PICKS = null;                // 오늘의 답 (top/value/alt …)
-  let FULL = null, VIEWBOX = null; // 그래프 전체 범위 / 확대한 범위
+  let FULL = null, VIEWBOX = null, viewKind = null; // 그래프 전체 범위 / 확대한 범위 / 확대할 때의 가로축
   let quietRender = false, chartDrawn = false, chartVisible = true;
   let hoverCo = null, hoverSeries = null, lastTapKey = null;
   let SIDX = new Map();
@@ -100,7 +112,7 @@
   let wheelHintN = 0, wheelHintT = 0;
   let drag = null, suppressClick = false, touch = null;
   let rafPending = false, labelTimer = null, resizeTimer = null, lastSize = "";
-  let searchTimer = null, fsSeq = 0, pendingBack = 0;
+  let searchTimer = null, fsSeq = 0, pendingBack = 0, ownExit = 0;   // ownExit: 우리가 부른 전체 화면 해제 수
   let lastKeyboard = false, detailOpener = null;
   let helperOk = false, refreshTick = null, installEvt = null;
   const layers = [];               // 뒤로 가기로 닫을 판 (크게 보기·휴대폰 상세·조절 판)
@@ -132,7 +144,7 @@
   const howToSet = (m, e) => C.howToSet(m, e, EG[m.company]);
   const defaultEffort = (m) => C.defaultEffort(m, EDEF);
   const announce = (msg) => { const el = $("#srLive"); if (el) { el.textContent = ""; setTimeout(() => { el.textContent = msg; }, 30); } };
-  const onMQ = (mq, fn) => (mq.addEventListener ? mq.addEventListener("change", fn) : mq.addListener(fn));   // 옛 사파리도
+  const onMQ = (mq, fn) => (mq.addEventListener ? listen(mq, "change", fn) : mq.addListener((e) => { if (!DEAD) fn(e); }));   // 옛 사파리도
   const tx = (v) => Math.log10(v);
   const itx = (t) => 10 ** t;
 
@@ -199,19 +211,23 @@
         if (M) list.push(M);
       }
     }
-    return { list, pool, found, cutoff, base, selHidden };
+    return { list, pool, found, cutoff, base, selHidden, extra: null };   // extra: render 가 제한 밖에서 더한 모델 (경계선·오늘의 답)
   }
   // 검색 결과 중 몇 개가 그래프에 보이고, 나머지는 무엇 때문에 가려졌는지
   function searchReport(F, points) {
     if (!F.found) return null;
     const inList = new Set(F.list);
     const drawn = new Set(points.filter((p) => p.x != null).map((p) => p.M));
-    const r = { found: F.found.length, shown: 0, pin: 0, front: 0, period: 0, cap: 0, co: 0, coGroups: [], est: 0, nocost: 0, sel: F.selHidden };
+    const r = { found: F.found.length, shown: 0, pin: 0, front: 0, pick: 0, period: 0, cap: 0, co: 0, coGroups: [], est: 0, nocost: 0, sel: F.selHidden };
     for (const M of F.found) {
       const g = groupOf(M.company);
       if (drawn.has(M)) {
         r.shown++;
-        if (!F.base.has(M)) { if (S.pinned.includes(M.key)) r.pin++; else r.front++; }
+        if (!F.base.has(M)) {
+          if (S.pinned.includes(M.key)) r.pin++;
+          else if (F.extra && F.extra.front.has(M)) r.front++;
+          else r.pick++;
+        }
       } else if (inList.has(M)) {
         if (!S.estimated && M.vs.some((v) => v.costKind === "가격 추정" && costFor(v) != null)) r.est++; else r.nocost++;
       } else if (outOfPeriod(M, F.cutoff)) r.period++;
@@ -256,10 +272,12 @@
       top: r.top.v, rival: r.rival ? r.rival.v : null, band: (v, w) => Math.sqrt((w || r.top.v).se ** 2 + v.se ** 2), near: r.near.map((p) => p.v),
       value: r.value.v, valueRows: r.valueRows.map((p) => p.v), topRows: r.topRows.map((p) => p.v), alt: r.alt ? r.alt.v : null, next: r.next ? r.next.v : null,
     } : null;
-    // 경계선 위 모델 · 오늘의 답 모델은 '회사마다 N개' 제한에 걸려도 그래프에 그림
-    const add = (M) => { if (M && !F.list.includes(M)) F.list.push(M); };
-    for (const p of FR.front) add(p.M);
-    if (r) for (const p of [r.top, r.value, ...r.valueRows, ...r.topRows]) add(p.M);
+    // 경계선 위 모델(경계선을 켰을 때만) · 오늘의 답 모델은 '회사마다 N개' 제한에 걸려도 그래프에 그림
+    // 왜 더해졌는지 따로 기억 → 검색 안내 줄이 '경계선 위'와 '오늘의 답'을 나눠 셈
+    F.extra = { front: new Set(), pick: new Set() };
+    const add = (M, why) => { if (M && !F.list.includes(M)) { F.list.push(M); F.extra[why].add(M); } };
+    if (S.frontier) for (const p of FR.front) add(p.M, "front");
+    if (r) for (const p of [r.top, r.value, ...r.valueRows, ...r.topRows]) add(p.M, "pick");
     const points = [];
     for (const M of F.list) for (const v of M.vs) points.push({ M, v, x: xOf(v) });
     VIEW = { all, list: F.list, points };
@@ -302,6 +320,7 @@
     const hid = SR.found - SR.shown;
     const plus = [];
     if (SR.front) plus.push(`가성비 경계선 위 ${SR.front}개`);
+    if (SR.pick) plus.push(`오늘의 답 ${SR.pick}개`);
     if (SR.pin) plus.push(`고정한 ${SR.pin}개`);
     let h = `<span class="sn-main"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>`
       + (!SR.found ? "찾은 모델 <b>0</b>개" : hid ? `찾은 모델 <b>${SR.found}</b>개 중 <b>${SR.shown}</b>개 보임` : `찾은 모델 <b>${SR.found}</b>개 모두 보임`)
@@ -384,7 +403,7 @@
     };
     const leave = () => { hov = null; chart.dispatchAction({ type: "downplay" }); chart.dispatchAction({ type: "hideTip" }); };
     if (CAN_HOVER) { host.addEventListener("mouseover", enter); host.addEventListener("mouseleave", leave); }
-    host.addEventListener("focusin", enter);
+    host.addEventListener("focusin", (e) => { if (lastKeyboard) enter(e); });   // 키보드로 왔을 때만 (휴대폰 터치로 생긴 초점에 말풍선이 머리칸 위로 뜨지 않게)
     host.addEventListener("focusout", (e) => { if (!host.contains(e.relatedTarget)) leave(); });
     host.addEventListener("click", (e) => { const t = pick(e); if (t) pinAndShow(t.dataset.key, t.dataset.eff, t); });
   }
@@ -498,6 +517,7 @@
     const a = Math.log10(lo), b = Math.log10(hi);
     const pad = Math.max(0.06, (b - a) * 0.03);
     FULL = { x0: 10 ** (a - pad), x1: 10 ** (b + pad), y0, y1 };
+    if (viewKind !== S.x) { VIEWBOX = null; viewKind = S.x; }   // 가로축(문제당 ↔ 맞힌 문제당)이 바뀌면 값의 크기가 달라 확대 범위가 의미 없음
     VIEWBOX = C.clampView(VIEWBOX, FULL);
     const V = VIEWBOX || FULL;
 
@@ -695,7 +715,7 @@
       },
       tooltip: {
         trigger: "item", confine: true, enterable: false, backgroundColor: "transparent", borderWidth: 0, padding: 0,
-        extraCssText: "box-shadow:none;", transitionDuration: 0.15,
+        extraCssText: "box-shadow:none;", transitionDuration: 0.15, className: "chart-tip",
         formatter: (p) => {
           if (p.data && p.data.v) return tipHtml(p.data.v);
           if (p.seriesType === "line" && seriesKey(p)) {
@@ -719,7 +739,7 @@
     h += `<div class="tip-score"><b>${v.score.toFixed(1)}</b><span>±${v.se.toFixed(1)} · 신뢰도 ${c.t}</span></div>`;
     h += `<div class="tip-row"><span>문제당 비용</span><b>${C.fmtCost(v.cost)}${v.costKind && v.costKind !== "측정" ? ` <span class="muted">(${esc(v.costKind)})</span>` : ""}</b></div>`;
     if (v.costOk != null) h += `<div class="tip-row"><span>맞힌 문제당 <span class="muted">(${esc(DIFF.label)} ${C.fmtAcc(v.acc)})</span></span><b>${C.fmtCost(v.costOk)}</b></div>`;
-    if (M.price) h += `<div class="tip-row"><span>가격표 (입력/출력)</span><span>${C.fmtPrice(M.price.in)} / ${C.fmtPrice(M.price.out)}</span></div>`;
+    if (M.price) h += `<div class="tip-row"><span>가격표 (입력/출력)</span><span>${C.fmtPriceExact(M.price.in)} / ${C.fmtPriceExact(M.price.out)}</span></div>`;
     const fs = (S.frontier ? FR : EMPTY_FR).status.get(vkey(v));
     if (fs) {
       const t = fs.st === "front" ? "<b>경계선 위</b> — 이 가격대에서 최선"
@@ -802,7 +822,7 @@
     zoomOn = on;
     chartBox.classList.toggle("zoom-on", on);
     $("#zoomBadge").setAttribute("aria-hidden", String(!on));
-    if (on) { hideToast(); window.addEventListener("wheel", blockWheel, { passive: false }); }
+    if (on) { hideToast(); listen(window, "wheel", blockWheel, { passive: false }); }
     else window.removeEventListener("wheel", blockWheel);
   }
   function showToast(msg) {
@@ -875,7 +895,7 @@
   function pinAndShow(key, effort, opener) {
     addPin(key);
     S.selected = key; S.selEffort = effort || null;
-    detailOpener = opener || document.activeElement;
+    detailOpener = describeFocus(opener || document.activeElement);
     render();
   }
   function renderPinBar() {
@@ -894,7 +914,7 @@
       nameBtn.setAttribute("aria-pressed", String(S.selected === key));
       nameBtn.innerHTML = `<span class="sw" style="background:${esc(colorOf(M.company))}"></span>`;
       nameBtn.append(document.createTextNode(M.name));
-      nameBtn.addEventListener("click", () => { S.selected = key; S.selEffort = null; detailOpener = nameBtn; render(); });
+      nameBtn.addEventListener("click", () => { S.selected = key; S.selEffort = null; detailOpener = describeFocus(nameBtn); render(); });
       const x = document.createElement("button");
       x.type = "button"; x.className = "x"; x.textContent = "×"; x.dataset.key = key; x.setAttribute("aria-label", M.name + " 고정 해제");
       x.addEventListener("click", (e) => { e.stopPropagation(); togglePin(key); });
@@ -1129,7 +1149,7 @@
     const now = today();
     let h = `<div class="detail-in"><div class="detail-body">`;
     h += `<div class="d-head"><div><div class="d-title"><span class="sw" style="background:${esc(col)}"></span><h3 id="detailTitle" tabindex="-1">${esc(M.name)}</h3>${C.daysSince(M.date, now) <= 30 ? '<span class="badge new">새</span>' : ""}</div>`;
-    h += `<div class="d-meta"><span>${esc(M.company)}</span><span>${esc(M.date || "?")} 출시</span>${m.price ? `<span>가격표 입력 ${C.fmtPrice(m.price.in)} · 출력 ${C.fmtPrice(m.price.out)} <span class="muted">/100만 토큰</span></span>` : ""}</div></div>`;
+    h += `<div class="d-meta"><span>${esc(M.company)}</span><span>${esc(M.date || "?")} 출시</span>${m.price ? `<span>가격표 입력 ${C.fmtPriceExact(m.price.in)} · 출력 ${C.fmtPriceExact(m.price.out)} <span class="muted">/100만 토큰</span></span>` : ""}</div></div>`;
     h += `<button class="btn btn-ghost d-close" type="button" id="closeDetail">닫기</button></div>`;
     h += `<div class="dcols"><div class="dcol"><div class="sect">추론 등급별 <span class="muted" style="letter-spacing:0;font-weight:500">줄을 누르면 설명이 바뀌어요</span></div>`;
     h += `<table class="dt"><thead><tr><th scope="col">등급</th><th class="num" scope="col">점수</th><th class="num" scope="col">문제당 비용</th><th scope="col">한 단계 올리면</th></tr></thead><tbody>`;
@@ -1186,36 +1206,54 @@
     if (!fromPop) popLayer("detail");
     render();
   }
+  // 상세를 닫으면 연 자리(같은 칸의 같은 줄)로 초점을 돌려줌 — 다시 그려졌어도 같은 칸 안에서 찾음
   function returnFocus() {
     const o = detailOpener;
     detailOpener = null;
     if (!lastKeyboard || !o) return;
-    let t = o.isConnected ? o : null;
-    if (!t && o.dataset && o.dataset.key) t = document.querySelector(`[data-key="${CSS.escape(o.dataset.key)}"]${o.dataset.eff ? `[data-eff="${CSS.escape(o.dataset.eff)}"]` : ""}`);
-    if (t) t.focus({ preventScroll: true });
+    let t = findFocus(o);
+    const host = !t && o.host ? document.getElementById(o.host) : null;
+    if (host) t = host.querySelector("button, a[href], [tabindex='0']") || (host.tabIndex >= 0 ? host : null);
+    if (!t && !o.host && o.d.key) t = document.querySelector(`[data-key="${CSS.escape(o.d.key)}"]${o.d.eff ? `[data-eff="${CSS.escape(o.d.eff)}"]` : ""}`);
+    if (t) focusEl(t);
   }
 
   // ───────── 다시 그려도 키보드 초점이 그 자리에 남도록
+  // 상태에 따라 붙었다 떨어지는 클래스(고정됨 sel · 켜짐 on · 지금 보는 cur 등)는 빼고 기억 → 다시 그린 뒤에도 같은 요소를 찾음
+  const STATE_CLS = new Set(["sel", "on", "off", "cur", "hl", "open", "first", "in", "show", "est", "old", "up", "dn"]);
+  const FOCUS_HOSTS = "#table, #cards, #headline, #notes, #pinBar, #legend, #searchNote, #detail, #ticker, #perCoMenu";
+  function focusSel(k) {
+    let sel = k.tag.toLowerCase() + (k.cls ? "." + CSS.escape(k.cls) : "");
+    for (const n of ["key", "eff", "g", "k", "sn", "v", "e"]) if (k.d[n] != null) sel += `[data-${n}="${CSS.escape(k.d[n])}"]`;
+    return sel;
+  }
+  function describeFocus(a) {
+    if (!a || a === document.body || a === root || !a.closest) return null;
+    const host = a.closest(FOCUS_HOSTS);
+    const k = { el: a, host: host ? host.id : null, tag: a.tagName, cls: [...a.classList].find((c) => !STATE_CLS.has(c)) || "", d: Object.assign({}, a.dataset), idx: 0 };
+    // 같은 줄이 두 카드에 있을 수 있음 → 그 칸 안에서 몇 번째였는지도 기억
+    if (host) k.idx = Math.max(0, [...host.querySelectorAll(focusSel(k))].indexOf(a));
+    return k;
+  }
+  function findFocus(k) {
+    if (!k) return null;
+    if (k.el.isConnected) return k.el;
+    const host = k.host ? document.getElementById(k.host) : null;
+    if (!host) return null;
+    const same = host.querySelectorAll(focusSel(k));
+    return same[k.idx] || same[0] || (k.host === "pinBar" ? host.querySelector(".pin-name, .pin-clear") : null);
+  }
+  function focusEl(t) {
+    if (t.matches("#table tbody tr")) { tableActive = t.dataset.key + "|" + t.dataset.eff; $$("#table tbody tr").forEach((row) => { row.tabIndex = row === t ? 0 : -1; }); }
+    t.focus({ preventScroll: true });
+  }
   function rememberFocus() {
-    /** @type {any} */
-    const a = document.activeElement;
-    if (!a || a === document.body || a === root) return null;
-    const host = a.closest && a.closest("#table, #cards, #headline, #notes, #pinBar, #legend, #searchNote, #detail, #ticker, #perCoMenu");
-    return { el: a, host: host ? host.id : null, tag: a.tagName, cls: a.classList[0] || "", d: Object.assign({}, a.dataset) };
+    return describeFocus(document.activeElement);
   }
   function restoreFocus(k) {
-    if (!k || k.el.isConnected || !k.host) return;
-    const host = document.getElementById(k.host);
-    if (!host) return;
-    const attrs = ["key", "eff", "g", "k", "sn", "v", "e"].filter((n) => k.d[n] != null);
-    let sel = k.tag.toLowerCase() + (k.cls ? "." + CSS.escape(k.cls) : "");
-    for (const n of attrs) sel += `[data-${n}="${CSS.escape(k.d[n])}"]`;
-    /** @type {any} */
-    const t = host.querySelector(sel) || (k.host === "pinBar" ? host.querySelector(".pin-name, .pin-clear") : null);
-    if (t) {
-      if (t.matches("#table tbody tr")) { tableActive = t.dataset.key + "|" + t.dataset.eff; $$("#table tbody tr").forEach((row) => { row.tabIndex = row === t ? 0 : -1; }); }
-      t.focus({ preventScroll: true });
-    }
+    if (!k || k.el.isConnected) return;
+    const t = findFocus(k);
+    if (t) focusEl(t);
   }
 
   // ───────── 뒤로 가기로 판 닫기 (크게 보기 · 휴대폰 상세 · 조절 판)
@@ -1230,12 +1268,19 @@
     layers.splice(i, 1);
     if (history.state && history.state.layer === name) { pendingBack++; history.back(); }
   }
-  window.addEventListener("popstate", () => {
-    if (pendingBack) { pendingBack--; return; }   // 우리가 부른 뒤로 가기
+  // 지금 기록이 '열려 있지 않은 판'의 기록이면 건너뜀 → 뒤로 가기를 눌렀는데 아무 일도 없는 경우가 없게
+  // (새로고침 뒤 남은 기록, 판을 닫는 순서가 열린 순서와 다를 때 남은 기록)
+  function skipDeadLayer() {
+    const st = history.state;
+    if (st && st.layer && !layers.includes(st.layer)) { pendingBack++; history.back(); }
+  }
+  listen(window, "popstate", () => {
+    if (pendingBack) { pendingBack--; skipDeadLayer(); return; }   // 우리가 부른 뒤로 가기
     const top = layers.pop();
     if (top === "full") setFull(false, true);
     else if (top === "detail") closeDetail(true);
     else if (top === "sheet") setSheet(false, true);
+    skipDeadLayer();
   });
 
   // ═════════ 조절 막대 ═════════
@@ -1246,14 +1291,18 @@
     $$("#perCoMenu .menu-item").forEach((b) => { const yes = +b.dataset.v === S.perCo; b.classList.toggle("on", yes); b.setAttribute("aria-pressed", String(yes)); });
     for (const [id, prop] of Object.entries(OPTS)) $("#" + id).checked = !!S[prop];
     const dark = root.dataset.theme === "dark";
-    $("#themeBtn").setAttribute("aria-pressed", String(dark));
-    $("#themeBtn").setAttribute("aria-label", dark ? "밝게 보기" : "어둡게 보기");
+    $("#themeBtn").setAttribute("aria-pressed", String(dark));   // 이름은 '어둡게 보기' 그대로, 켜졌는지는 눌림 상태로 (이름까지 바꾸면 '밝게 보기, 눌림'으로 잘못 읽힘)
   }
   function closeMenus() {
     $$(".menu.open").forEach((m) => { m.classList.remove("open"); m.querySelector(".menu-btn").setAttribute("aria-expanded", "false"); });
   }
 
   // ───────── 크게 보기 (휴대폰은 전체 화면 + 가로 회전 시도)
+  function exitFs() {
+    if (!document.fullscreenElement) return Promise.resolve();
+    ownExit++;
+    return document.exitFullscreen().catch(() => { ownExit = Math.max(0, ownExit - 1); });
+  }
   async function phoneLandscape(on) {
     if (!IS_PHONE) return;
     const my = ++fsSeq;   // 빠르게 열고 닫아도 늦게 끝난 '열기'가 화면을 잠가 두지 않게
@@ -1262,19 +1311,24 @@
     try {
       if (on) {
         const limit = (p) => Promise.race([p, new Promise((resolve, reject) => { setTimeout(() => reject(new Error("시간 초과")), 1500); })]);
-        if (!document.fullscreenElement && root.requestFullscreen) await limit(root.requestFullscreen({ navigationUI: "hide" }));
+        if (!document.fullscreenElement && root.requestFullscreen) {
+          const req = root.requestFullscreen({ navigationUI: "hide" });
+          // 시간 초과로 포기한 뒤에 늦게 성공해도, 그 사이 크게 보기를 닫았으면 바로 풀어 줌 (화면이 전체 화면에 갇히지 않게)
+          req.then(() => { if (!chartBox.classList.contains("full")) exitFs(); }, () => {});
+          await limit(req);
+        }
         if (stale()) throw new Error("이미 닫힘");
         if (!ori || !ori.lock) throw new Error("회전 고정 안 됨");
         await limit(ori.lock("landscape"));
         if (stale()) throw new Error("이미 닫힘");
       } else {
         if (ori && ori.unlock) ori.unlock();
-        if (document.fullscreenElement) await document.exitFullscreen();
+        if (document.fullscreenElement) await exitFs();
       }
     } catch (e) {
       if (stale() || !on) {
         try { if (ori && ori.unlock) ori.unlock(); } catch (e2) { /* 지원 안 함 */ }
-        if (document.fullscreenElement && !chartBox.classList.contains("full")) document.exitFullscreen().catch(() => {});
+        if (document.fullscreenElement && !chartBox.classList.contains("full")) exitFs();
       } else if (matchMedia("(orientation: portrait)").matches) showToast("휴대폰을 가로로 돌리면 더 넓게 보여요");
     }
   }
@@ -1284,8 +1338,7 @@
     phoneLandscape(on);
     document.body.classList.toggle("no-scroll", on);
     const b = $("#fullBtn");
-    b.setAttribute("aria-label", on ? "크게 보기 닫기" : "크게 보기");
-    b.setAttribute("aria-pressed", String(on));
+    b.setAttribute("aria-label", on ? "크게 보기 닫기" : "크게 보기");   // 눈에 보이는 글('닫기')과 맞게 이름만 바꿈 (눌림 상태는 쓰지 않음)
     b.title = on ? "크게 보기 닫기 (Esc)" : "그래프만 화면 가득 (휴대폰은 가로로 돌리면 더 넓게)";
     setZoomOn(on);
     if (on) pushLayer("full"); else if (!fromPop) popLayer("full");
@@ -1314,6 +1367,7 @@
     const box = $("#notice");
     let el = box.querySelector(`[data-n="${id}"]`);
     if (!html) { if (el) el.remove(); return; }
+    const fresh = !el;
     if (!el) { el = document.createElement("div"); el.dataset.n = id; box.append(el); }
     el.className = "notice" + (opts.kind === "err" ? " err" : "");
     el.setAttribute("role", opts.kind === "err" ? "alert" : "status");
@@ -1331,6 +1385,8 @@
       x.addEventListener("click", () => { el.remove(); if (opts.onClose) opts.onClose(); });
       acts.append(x);
     }
+    // 사용자가 누른 일(최신 받기)의 첫 안내는, 알림 줄이 화면 위로 지나가 있으면 보이는 곳으로 (알림 줄은 붙어 다니지 않음)
+    if (fresh && opts.reveal && box.getBoundingClientRect().top < $(".topbar").offsetHeight) box.scrollIntoView({ block: "start", behavior: REDUCED ? "auto" : "smooth" });
   }
   function healthNotice() {
     const H = D.health || {};
@@ -1409,7 +1465,7 @@
     if (!(await checkHelper())) {
       notice("refresh", location.protocol === "file:"
         ? "이 창은 파일로 직접 열려 있어서 데이터를 받을 수 없어요. 창을 닫고 <b>성능비교판_열기</b>로 다시 열어 주세요."
-        : "도우미가 꺼져 있어 데이터를 받을 수 없어요. <b>성능비교판_열기</b>를 다시 실행하면 켜져요.", { kind: "err" });
+        : "도우미가 꺼져 있어 데이터를 받을 수 없어요. <b>성능비교판_열기</b>를 다시 실행하면 켜져요.", { kind: "err", reveal: true });
       return;
     }
     const label = btn.querySelector("span");
@@ -1417,9 +1473,9 @@
     btn.disabled = true; btn.classList.add("busy"); btn.setAttribute("aria-busy", "true");
     label.innerHTML = "받는<br>중…";
     const t0 = Date.now();
-    const tick = () => notice("refresh", `최신 데이터를 받는 중이에요… <b>${Math.round((Date.now() - t0) / 1000)}초</b> (보통 10~30초)`, { close: false });
+    const tick = () => notice("refresh", `최신 데이터를 받는 중이에요… <b>${Math.round((Date.now() - t0) / 1000)}초</b> (보통 10~30초)`, { close: false, reveal: true });
     tick();
-    refreshTick = setInterval(tick, 1000);
+    refreshTick = every(tick, 1000);
     const r = await api("api/refresh" + (force ? "?force=1" : ""), 240000);
     clearInterval(refreshTick);
     btn.disabled = false; btn.classList.remove("busy"); btn.removeAttribute("aria-busy");
@@ -1441,8 +1497,8 @@
   // ═════════ 이벤트 연결 (그리기와 상관없이 먼저) ═════════
   function bindEvents() {
     // 키보드로 움직이는 중인지 (상세를 열 때 초점을 옮길지 정함)
-    document.addEventListener("keydown", (e) => { if (e.key === "Tab" || e.key === "Enter" || e.key === " " || e.key.startsWith("Arrow")) lastKeyboard = true; }, true);
-    document.addEventListener("pointerdown", () => { lastKeyboard = false; }, true);
+    listen(document, "keydown", (e) => { if (e.key === "Tab" || e.key === "Enter" || e.key === " " || e.key.startsWith("Arrow")) lastKeyboard = true; }, true);
+    listen(document, "pointerdown", () => { lastKeyboard = false; }, true);
 
     // 조절: 가로축·출시 · 회사마다 · 보기 켜고 끄기
     /** @type {[string, string, (v: string) => any][]} */
@@ -1472,7 +1528,7 @@
       perCoPop.append(b);
     }
     for (const [id, prop] of Object.entries(OPTS)) $("#" + id).addEventListener("change", (e) => { S[prop] = tgt(e).checked; render(); });
-    document.addEventListener("click", closeMenus);
+    listen(document, "click", closeMenus);
     $("#resetSettings").addEventListener("click", () => location.reload());   // 새로 열면 항상 기본값
 
     // 검색: 칠 때마다 (잠깐 기다렸다) · Enter = 바로 + 휴대폰 키보드 닫기
@@ -1518,7 +1574,7 @@
     });
     $("#moreRows").addEventListener("click", () => { tableLimit += 60; renderTable(VIEW.list); });
     // Enter·스페이스로 누를 수 있는 줄들
-    document.addEventListener("keydown", (e) => {
+    listen(document, "keydown", (e) => {
       if (e.key !== "Enter" && e.key !== " ") return;
       const t = tgt(e);
       if (t && t.matches && t.matches(".vt-row, #table tbody tr[data-key], #table th, .dt tr.eff-row, #headline .nm")) { e.preventDefault(); t.click(); }
@@ -1542,8 +1598,8 @@
       if (first && !chartBox.classList.contains("full")) centerAfterUp = true;
       setZoomOn(true);
     });
-    window.addEventListener("pointerup", () => { if (!centerAfterUp) return; centerAfterUp = false; setTimeout(centerChart, 0); });
-    document.addEventListener("pointerdown", (e) => { if (!chartBox.contains(tgt(e)) && !chartBox.classList.contains("full")) setZoomOn(false); });
+    listen(window, "pointerup", () => { if (!centerAfterUp) return; centerAfterUp = false; setTimeout(centerChart, 0); });
+    listen(document, "pointerdown", (e) => { if (!chartBox.contains(tgt(e)) && !chartBox.classList.contains("full")) setZoomOn(false); });
     chartEl.addEventListener("wheel", (e) => {
       const rect = chartEl.getBoundingClientRect();
       const px = e.clientX - rect.left, py = e.clientY - rect.top;
@@ -1562,17 +1618,24 @@
       zoomAt(px, py, f, e.shiftKey ? "x" : e.altKey ? "y" : "xy");
     }, { passive: false });
     // 키보드로 확대·이동 (그래프에 초점이 있을 때)
+    //  · 방향키는 키보드(Tab)로 그래프에 왔거나 확대 모드일 때만 — 마우스로 점을 누른 뒤에는 방향키로 평소처럼 페이지가 내려감
+    //  · 확대 모드에서는 PageDown·스페이스·End 로 페이지가 움직이지 않게
+    const PAGE_KEYS = new Set(["PageUp", "PageDown", "Home", "End", " "]);
+    let chartKbd = false;
+    chartEl.addEventListener("focus", () => { chartKbd = lastKeyboard; });
+    chartEl.addEventListener("pointerdown", () => { chartKbd = false; });
     chartEl.addEventListener("keydown", (e) => {
       const r = gridRect();
       if (!r) return;
       const k = e.key;
-      if (k === "+" || k === "=") zoomCenter(0.7);
+      if (k === "+" || k === "=") { chartKbd = true; zoomCenter(0.7); }
       else if (k === "-" || k === "_") { if (VIEWBOX) zoomCenter(1 / 0.7); }
       else if (k === "0") resetView();
       else if (k.startsWith("Arrow")) {
+        if (!chartKbd && !zoomOn) return;
         if (!VIEWBOX) { showToast("먼저 + 키로 확대하면 방향키로 옮길 수 있어요"); e.preventDefault(); return; }
         panBy(k === "ArrowLeft" ? -0.1 : k === "ArrowRight" ? 0.1 : 0, k === "ArrowUp" ? 0.1 : k === "ArrowDown" ? -0.1 : 0);
-      } else return;
+      } else if (!(zoomOn && PAGE_KEYS.has(k))) return;
       e.preventDefault();
     });
     // 끌어서 이동 (확대된 상태에서)
@@ -1582,7 +1645,7 @@
       if (!inGrid(e.clientX - rect.left, e.clientY - rect.top)) return;
       drag = { sx: e.clientX, sy: e.clientY, v: VIEWBOX, moved: false };
     }, true);
-    window.addEventListener("mousemove", (e) => {
+    listen(window, "mousemove", (e) => {
       if (!drag) return;
       const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
       if (!drag.moved && Math.hypot(dx, dy) < 4) return;
@@ -1590,7 +1653,7 @@
       const r = gridRect();
       if (r) panBy(-dx / r.width, dy / r.height, drag.v);
     });
-    window.addEventListener("mouseup", () => {
+    listen(window, "mouseup", () => {
       if (!drag) return;
       if (drag.moved) { suppressClick = true; setTimeout(() => { suppressClick = false; }, 50); }
       chartEl.classList.remove("panning");
@@ -1667,28 +1730,34 @@
     $("#zoomIn").addEventListener("click", () => zoomCenter(0.7));
     $("#zoomOut").addEventListener("click", () => { if (VIEWBOX) zoomCenter(1 / 0.7); });
     $("#fullBtn").addEventListener("click", () => setFull(!chartBox.classList.contains("full")));
-    document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && chartBox.classList.contains("full") && IS_PHONE) setFull(false); });
+    listen(document, "fullscreenchange", () => {
+      if (document.fullscreenElement) return;
+      if (ownExit) { ownExit--; return; }   // 우리가 부른 해제 → 그 사이 다시 연 크게 보기를 닫지 않음
+      if (chartBox.classList.contains("full") && IS_PHONE) setFull(false);   // 휴대폰 뒤로 가기 등으로 전체 화면이 풀림
+    });
 
-    // Esc: 맨 위의 것 하나만 닫음 (메뉴 → 조절 판 → 크게 보기 → 상세 → 확대 모드)
-    document.addEventListener("keydown", (e) => {
+    // Esc: 맨 위의 것 하나만 닫음 (메뉴 → 조절 판 → 크게 보기 위의 상세 → 크게 보기 → 상세 → 확대 모드)
+    listen(document, "keydown", (e) => {
       if (e.key !== "Escape") return;
       if ($(".menu.open")) { closeMenus(); return; }
       if (tgt(e) && tgt(e).id === "search" && tgt(e).value) return;   // 검색칸: 글자 지우기는 브라우저가
       if ($("#dock").classList.contains("open")) { setSheet(false); $("#dockToggle").focus(); return; }
+      const detailOpen = $("#detail").classList.contains("open");
+      if (detailOpen && chartBox.classList.contains("full")) { closeDetail(); return; }   // 크게 보기 위에 뜬 상세가 맨 위
       if (chartBox.classList.contains("full")) { setFull(false); $("#fullBtn").focus(); return; }
-      if ($("#detail").classList.contains("open")) { closeDetail(); return; }
+      if (detailOpen) { closeDetail(); return; }
       setZoomOn(false);
     });
     // 확대 모드일 때는 방향키·스페이스로 페이지가 움직이지 않게 (그래프 초점이면 그래프가 처리)
     const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
-    document.addEventListener("keydown", (e) => {
+    listen(document, "keydown", (e) => {
       if (!zoomOn || !SCROLL_KEYS.has(e.key)) return;
       const t = tgt(e);
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(t.tagName) || (t.hasAttribute && t.hasAttribute("tabindex")))) return;
       e.preventDefault();
     });
     // '/' 를 누르면 검색칸으로
-    document.addEventListener("keydown", (e) => {
+    listen(document, "keydown", (e) => {
       if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
       const t = tgt(e);
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
@@ -1722,14 +1791,14 @@
     // 최신 받기 · 앱 설치
     if (HOSTED) $("#refreshBtn").hidden = true;
     $("#refreshBtn").addEventListener("click", () => refreshNow(true));
-    window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installEvt = e; $("#installBtn").hidden = false; });
+    listen(window, "beforeinstallprompt", (e) => { e.preventDefault(); installEvt = e; $("#installBtn").hidden = false; });
     $("#installBtn").addEventListener("click", async () => {
       if (!installEvt) return;
       installEvt.prompt();
       await installEvt.userChoice.catch(() => null);
       installEvt = null; $("#installBtn").hidden = true;
     });
-    window.addEventListener("appinstalled", () => { $("#installBtn").hidden = true; });
+    listen(window, "appinstalled", () => { $("#installBtn").hidden = true; });
 
     // 크기가 바뀌면 그래프·핀·영역 이름을 새 크기에 맞춰 다시 그림
     const onResize = () => {
@@ -1741,17 +1810,17 @@
         updateLegendFade();
       }, 150);
     };
-    if (window.ResizeObserver) new ResizeObserver(onResize).observe(chartEl); else window.addEventListener("resize", onResize);
+    if (window.ResizeObserver) watch(new ResizeObserver(onResize)).observe(chartEl); else listen(window, "resize", onResize);
     $("#legend").addEventListener("scroll", updateLegendFade, { passive: true });
     // 그래프가 화면 밖이면 흐르는 빛을 멈춤 (배터리·버벅임)
     if ("IntersectionObserver" in window && !REDUCED) {
-      new IntersectionObserver((ents) => {
+      watch(new IntersectionObserver((ents) => {
         const vis = ents.some((en) => en.isIntersecting);
         if (vis !== chartVisible) { chartVisible = vis; if (VIEW) quietChart(); }
-      }).observe(chartBox);
+      })).observe(chartBox);
     }
     // 인쇄할 때는 숨은 구역도 모두 보이게
-    window.addEventListener("beforeprint", () => $$(".rv").forEach((el) => el.classList.add("in")));
+    listen(window, "beforeprint", () => $$(".rv").forEach((el) => el.classList.add("in")));
   }
   function announceSearch() {
     if (!S.search.trim()) return;
@@ -1783,8 +1852,8 @@
       place();
     };
     let tick = false;
-    window.addEventListener("scroll", () => { if (!tick) { tick = true; requestAnimationFrame(() => { tick = false; update(); }); } }, { passive: true });
-    window.addEventListener("resize", place);
+    listen(window, "scroll", () => { if (!tick) { tick = true; requestAnimationFrame(() => { tick = false; update(); }); } }, { passive: true });
+    listen(window, "resize", place);
     update();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(place);
   }
@@ -1795,13 +1864,14 @@
     setThemeColor("#ffffff");
     bindEvents();
     topNav();
+    skipDeadLayer();      // 새로고침 전에 열려 있던 판의 기록이 남았으면 건너뜀
     if (NORM.problems.length) notice("data", esc(NORM.problems.join(" · ")) + " (나머지는 그대로 보여 드려요)");
     pickCompanies(getAll(S.selectableOnly));
     render();
     renderFacts(getAll(S.selectableOnly), true);
     renderFooter();
     renderStatus();
-    setInterval(renderStatus, 60000);
+    every(renderStatus, 60000);
     healthNotice();
     if (HOSTED && "serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
     if (HOSTED && /KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line\//i.test(navigator.userAgent) && /Android/i.test(navigator.userAgent)) {
@@ -1818,9 +1888,9 @@
     // 이 컴퓨터의 도우미가 켜져 있으면: 1분마다 '창이 열려 있다'고 알리고, 1시간마다 조용히 새 데이터 확인
     (HOSTED ? Promise.resolve(false) : checkHelper()).then((ok) => {
       if (!ok) return;
-      setInterval(() => api("api/ping", 3000), 60000);
-      document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkHelper(); });
-      setInterval(async () => {
+      every(() => api("api/ping", 3000), 60000);
+      listen(document, "visibilitychange", () => { if (document.visibilityState === "visible") checkHelper(); });
+      every(async () => {
         const r = await api("api/refresh", 240000);
         if (r && r.changed) notice("newdata", "새 데이터가 들어왔어요.", { actions: [{ label: "반영하기", fn: () => location.reload() }] });
       }, 3600000);
@@ -1830,7 +1900,7 @@
     // 스크롤하면 구역이 떠오름
     window.__rvReady = true;
     if (root.classList.contains("io")) {
-      const io = new IntersectionObserver((ents) => ents.forEach((en) => { if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); } }), { rootMargin: "0px 0px -6% 0px" });
+      const io = watch(new IntersectionObserver((ents) => ents.forEach((en) => { if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); } }), { rootMargin: "0px 0px -6% 0px" }));
       $$(".rv").forEach((el) => io.observe(el));
     }
     // 글꼴이 늦게 도착하면 그래프 글자를 한 번 더 그림 (그래프는 그림이라 글꼴이 자동으로 안 바뀜)

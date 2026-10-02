@@ -168,24 +168,95 @@ def _update_state(failing, now_stamp):
 
 
 def _prices_from(prev):
-    """OpenRouter 를 못 받았을 때: 마지막 정상 데이터의 가격·등급 정보를 모델별로 가져옴 (가격표는 자주 바뀌지 않음)"""
+    """OpenRouter 를 못 받았을 때: 마지막 정상 데이터의 가격·등급 정보를 모델별로 가져옴 (가격표는 자주 바뀌지 않음)
+    표시 이름·날짜도 지난번 것을 그대로 넘김 (OpenRouter 가 빠진 날 이름이 'Sonar' → 'Sonar Reasoning' 처럼 바뀌지 않게)"""
     out = {}
     for m in (prev or {}).get("models") or []:
         p = m.get("price") if isinstance(m, dict) else None
         if not isinstance(p, dict) or _num(p.get("in")) is None or _num(p.get("out")) is None:
             continue
-        out[m["key"]] = {"id": p.get("id"), "in": p["in"], "out": p["out"], "name": None, "created": None,
+        name, date = m.get("name"), m.get("date")
+        out[m["key"]] = {"id": p.get("id"), "in": p["in"], "out": p["out"],
+                         "name": name if isinstance(name, str) and name else None,
+                         "created": date if isinstance(date, str) and date else None,
                          "efforts": m.get("efforts_supported") or [], "default_effort": m.get("effort_default_or"),
                          "reasoning_mandatory": m.get("reasoning_mandatory")}
     return out
 
 
+def _efforts_by_base(raw):
+    """모호한 등급 정리(combine.drop_ambiguous)가 보게 될 등급들 → (점수 쪽, 비용 쪽) 각각 {기본이름: 등급 모음}
+    Epoch 점수는 벤치마크가 너무 적으면 능력치 계산에서 빠지므로 같은 기준으로 세지 않음"""
+    ep = raw["epoch"]
+    edi, info = ep.get("edi") or {}, ep.get("info") or {}
+    score: dict[str, set] = {}
+    cost: dict[str, set] = {}
+    for (b, e), bm in ep["obs"].items():
+        if combine.enough_benchmarks(sum(1 for x in bm if x in edi), info.get(b, {}).get("eci") is not None):
+            score.setdefault(b, set()).add(e)
+    for b, e in (raw.get("aa") or {}).get("scores", {}):
+        score.setdefault(b, set()).add(e)
+    for d in [*(ep.get("costs") or {}).values(), (raw.get("aa") or {}).get("costs") or {}, (raw.get("livebench") or {}).get("costs") or {}]:
+        for b, e in d:
+            cost.setdefault(b, set()).add(e)
+    return score, cost
+
+
+def _merge_loses_points(members, score, cost):
+    """이 기본이름들을 한 모델로 합치면 모호한 점('기본'·'추론 켬')이 새로 지워지는지
+    · 명시 등급(낮음·높음 등)이 있는 모델의 모호한 점은 지워진다 (drop_ambiguous)
+    · 그래서 명시 등급이 없던 이름(그룹 쪽이든 버전 쪽이든)이 명시 등급이 있는 이름과 합쳐지면,
+      따로 있을 땐 남았을 그 이름의 모호한 점을 잃음
+      (2026-10-02: Gemma 4 26B A4B 에 Epoch 의 '-it 최소' 를 합쳤더니 Epoch '기본'·AA '추론 켬' 점이 사라졌음)
+    점수 쪽은 점수 출처의 명시 등급만, 비용 쪽은 점수·비용 출처 모두의 명시 등급으로 판단 (collect.main 과 같게)"""
+    def explicit(es):
+        return any(e in combine.EXPLICIT and e != "none" for e in es)
+
+    def ambiguous(es):
+        return any(e in combine.AMBIGUOUS for e in es)
+    s_ex = {b: explicit(score.get(b, ())) for b in members}
+    c_ex = {b: s_ex[b] or explicit(cost.get(b, ())) for b in members}
+    g_s, g_c = any(s_ex.values()), any(c_ex.values())
+    return any((g_s and not s_ex[b] and ambiguous(score.get(b, ())))
+               or (g_c and not c_ex[b] and ambiguous(cost.get(b, ()))) for b in members)
+
+
+def _share_prices(raw, cand):
+    """OpenRouter 가 버전 이름으로만 가격을 적어 둔 경우 그룹 이름에도 같은 가격을 씀 (같은 모델이므로)
+    예) google/gemma-4-26b-a4b-it → gemma-4-26b-a4b, mistral-large-2512 → mistral-large-3 → 개수"""
+    prices = (raw.get("openrouter") or {}).get("prices")
+    if not isinstance(prices, dict):
+        return 0
+    n = 0
+    for gb in sorted(set(cand.values())):
+        got = [prices[vb] for vb in sorted(cand) if cand[vb] == gb and vb in prices]
+        if gb not in prices and got:
+            prices[gb] = min(got, key=lambda p: len(str(p.get("id") or "")))   # 여러 개면 id 가 짧은(정식) 것
+            n += 1
+    return n
+
+
 def merge_epoch_groups(raw):
-    """Epoch 버전 기본이름 → 그룹 기본이름으로 바꿔 다른 기관과 같은 모델로 묶음 → 바꾼 개수"""
+    """Epoch 버전 기본이름 → 그룹 기본이름으로 바꿔 다른 기관과 같은 모델로 묶음 → 바꾼 개수
+    · 합치면 모호한 점이 새로 지워지는 경우엔 합치지 않음 (_merge_loses_points) → 따로 두면 모든 점이 남음
+    · 가격은 합치지 않은 경우에도 그룹 이름으로 나눠 씀 (_share_prices)"""
     ep = raw["epoch"]
     alias = ep.get("group_alias") or {}
     aa_bases = {k[0] for k in (raw.get("aa") or {}).get("scores", {})}
-    use = {vb: gb for vb, gb in alias.items() if gb in aa_bases and vb not in aa_bases}
+    cand = {vb: gb for vb, gb in alias.items() if gb in aa_bases and vb not in aa_bases}
+    n_price = _share_prices(raw, cand)
+    if n_price:
+        log(f"  버전 이름의 OpenRouter 가격을 그룹 이름에도 씀: {n_price}개")
+    score, cost = _efforts_by_base(raw)
+    use: dict[str, str] = {}
+    kept = []
+    for vb, gb in cand.items():          # Epoch 원본 순서대로 (같은 그룹에 여러 판이면 먼저 나온 판의 날짜·이름을 씀)
+        if _merge_loses_points([gb, *(v for v, g in use.items() if g == gb), vb], score, cost):
+            kept.append(vb)
+        else:
+            use[vb] = gb
+    if kept:
+        log(f"  합치면 '기본'·'추론 켬' 점이 지워져서 따로 둔 Epoch 이름: {len(kept)}개 ({', '.join(f'{v}→{cand[v]}' for v in kept[:5])}{' …' if len(kept) > 5 else ''})")
     if not use:
         return 0
 
@@ -205,6 +276,12 @@ def merge_epoch_groups(raw):
         for (b, e), c in d.items():
             logs.setdefault((use.get(b, b), e), []).append(math.log(c))
         ep["costs"][label] = {k: math.exp(sum(v) / len(v)) for k, v in logs.items()}
+    # LiveBench 비용이 버전 이름으로 적혀 있으면 같이 옮김 (그룹 이름 쪽에 이미 있으면 그것을 둠)
+    lb = (raw.get("livebench") or {}).get("costs")
+    if isinstance(lb, dict):
+        for b, e in [k for k in lb if k[0] in use]:
+            c = lb.pop((b, e))
+            lb.setdefault((use[b], e), c)
     for vb, gb in use.items():
         if vb in ep["info"]:
             inf = ep["info"].pop(vb)
@@ -255,6 +332,7 @@ def main(force=False):
 
     # ── 0. 같은 모델인데 Epoch 만 다른 이름(날짜 코드 등)으로 부르는 경우 → Epoch 그룹 이름으로 합침
     #  (AA 가 그룹 이름 쪽을 쓰고 버전 이름은 쓰지 않을 때만 — 다른 기관이 버전 이름을 쓰면 그대로 둬야 함께 묶임)
+    #  (합치면 '기본'·'추론 켬' 점이 지워지는 경우도 합치지 않음. 가격은 이때도 그룹 이름에 나눠 씀)
     merge_epoch_groups(raw)
 
     # ── 1. 출처별 점수 모으기
@@ -427,16 +505,26 @@ def main(force=False):
     if stale:
         health["stale_hours"] = stale
     data["health"] = health
+    # 결과에 파일로 쓸 수 없는 값(무한대 등)이 섞였으면 수집 전체가 멈추지 않게, 원인을 기록하고 마지막 정상 데이터를 씀
+    try:
+        _dumps(data)
+    except (ValueError, TypeError) as e:
+        health["write_error"] = f"{type(e).__name__}: {e}"[:300]
+        log(f"  ✗ 결과에 파일로 쓸 수 없는 값이 있음: {e}")
     # 한 기관이라도 받기에 실패했으면 반쪽 데이터를 내보내지 않는다 (2026-09-30: AA 429 오류로 모델 494→193개가 된 적 있음)
-    if not healthy(data):
+    if "write_error" in health or not healthy(data):
         bad = [x for x in health["failed"] if x != "OpenRouter"] or ["일부 기관"]
+        why = "결과 값 이상" if "write_error" in health else f"{', '.join(bad)} 받기 실패"
         prev = previous_good()
         if prev:
             prev["health"] = dict(health, using_previous=True)
             write_data(prev)
-            log(f"⚠ {', '.join(bad)} 받기 실패 → 반쪽 데이터 대신 마지막 정상 데이터({prev.get('generated')})를 그대로 씀")
+            log(f"⚠ {why} → 이번 결과 대신 마지막 정상 데이터({prev.get('generated')})를 그대로 씀")
             return 0
-        log(f"⚠ {', '.join(bad)} 받기 실패, 쓸 수 있는 이전 정상 데이터도 없어 받은 것만으로 만듦")
+        if "write_error" in health:
+            log(f"⚠ {why}, 쓸 수 있는 이전 정상 데이터도 없어 화면 파일을 바꾸지 않고 끝냄")
+            return 1
+        log(f"⚠ {why}, 쓸 수 있는 이전 정상 데이터도 없어 받은 것만으로 만듦")
         health["partial"] = True
     write_data(data)
     if healthy(data):

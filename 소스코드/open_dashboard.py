@@ -35,7 +35,7 @@ def start_server():
     if not os.path.exists(exe):
         exe = sys.executable
     flags = 0
-    if os.name == "nt":
+    if sys.platform == "win32":     # (mypy 가 윈도우 전용 상수를 알아보도록 sys.platform 으로 확인)
         flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
     try:
         proc = subprocess.Popen([exe, "-B", os.path.join(HERE, "server.py")], cwd=HERE, creationflags=flags,

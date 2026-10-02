@@ -8,6 +8,8 @@
 #
 #   python 소스코드/auto_check.py          → 문제 확인 후 이슈 열기/고치기/닫기 (GH_TOKEN 필요)
 #   python 소스코드/auto_check.py --dry    → 이슈는 건드리지 않고 문제만 출력 (시험용)
+#   python 소스코드/auto_check.py --덧붙이기 → 실행 단계 실패만 알림. 열린 알림이 있으면 덮어쓰지 않고 댓글로 덧붙임
+#                                            (배포 작업 실패 알림용 — 이 작업에는 data.json 이 없어서 데이터 점검은 안 함)
 import sys
 
 sys.dont_write_bytecode = True
@@ -75,9 +77,15 @@ def find_problems():
         out.append("데이터 계산 단계가 오류로 멈췄어요. 사이트는 이전 화면을 그대로 보여 주고 있어요. "
                    "(평가기관 데이터 형식이 바뀌었을 수 있음 → 실행 기록의 오류 메시지 확인 필요)")
     if os.environ.get("BUILD_OUTCOME") == "failure":
-        out.append("사이트 파일 묶기가 실패했어요 (비밀 값 SITE_SECRET·AA_API_KEY 확인). 사이트는 이전 화면을 그대로 보여 주고 있어요.")
+        out.append("사이트 파일 묶기가 실패했어요. 사이트는 이전 화면을 그대로 보여 주고 있어요. "
+                   "(실행 기록의 오류 메시지 확인 필요 — 예: 비밀 값 AA_API_KEY 없음, 화면 파일 빠짐)")
+    if os.environ.get("JOB_FAILED") == "build":
+        out.append("사이트 만들기 작업이 점검 전에 멈췄어요 (준비 단계 실패). 사이트는 이전 화면을 그대로 보여 주고 있어요. "
+                   "실행 기록을 확인하고 'Re-run all jobs' 로 다시 돌려 보세요.")
     if os.environ.get("DEPLOY_RESULT") == "failure":
-        out.append("사이트 올리기(GitHub Pages 배포)가 실패했어요. 저장소 설정 → Pages 를 확인해 주세요.")
+        out.append("사이트 올리기(GitHub Pages 배포)가 실패했어요. 저장소 설정 → Pages 를 확인한 뒤 'Re-run failed jobs' 로 다시 돌려 보세요.")
+    if "--덧붙이기" in sys.argv:
+        return out
     d = _load_data()
     if d is None:
         if not out:
@@ -93,6 +101,10 @@ def find_problems():
         mentioned.update(names)
         out.append(f"{', '.join(names)} 데이터를 {age:.0f}시간째 새로 받지 못하고 있어요 "
                    f"(사이트는 {d.get('generated')} 기준 정상 데이터를 보여 주는 중). 키 만료·주소 변경·사용 한도를 확인해 주세요.")
+    werr = h.get("write_error")
+    if isinstance(werr, str) and werr:      # 받기는 됐는데 결과에 이상한 값(무한대 등)이 섞임 → 기다려도 안 풀리는 문제라 바로 알림
+        out.append(f"계산 결과에 파일로 쓸 수 없는 값이 섞여, 이번 결과 대신 예전 정상 데이터를 보여 주고 있어요 (원인: {werr[:160]}). "
+                   "기관 데이터 형식이 바뀌었을 수 있어요 → 수집기(sources.py·collect.py) 확인이 필요해요.")
     partial = [x for x in failed if x in SCORE_SOURCES]
     if partial and not h.get("using_previous"):
         mentioned.update(partial)
@@ -128,7 +140,7 @@ def main():
         print("·", p)
     if not problems:
         print("문제 없음")
-    if "--dry" in sys.argv:
+    if "--dry" in sys.argv or ("--덧붙이기" in sys.argv and not problems):    # 덧붙일 것이 없으면 이슈를 건드리지 않음
         return 0
     repo = os.environ.get("GITHUB_REPOSITORY")
     if not repo or not os.environ.get("GH_TOKEN"):
@@ -142,6 +154,15 @@ def main():
         return 0
     found = [n for n in listed.split() if n.isdigit()]
     stamp = now_kst().strftime("%Y-%m-%d %H:%M")
+    if "--덧붙이기" in sys.argv:
+        # 앞 작업의 자동 점검이 쓴 내용(데이터 문제 등)을 지우지 않도록 댓글로만 덧붙임 · 닫지도 않음
+        note = f"{stamp} (한국 시간) 추가 알림:\n\n" + "\n".join(f"- {p}" for p in problems)
+        if found:
+            gh("issue", "comment", found[0], "-R", repo, "--body", note)
+        else:
+            gh("issue", "create", "-R", repo, "--title", TITLE, "--label", LABEL, "--body",
+               note + "\n\n다음 정상 실행에서 문제가 없으면 이 알림은 자동으로 닫혀요.")
+        return 0
     if problems:
         body = ("자동 점검에서 확인이 필요한 일을 찾았어요. (마지막 점검: " + stamp + ", 한국 시간)\n\n" +
                 "\n".join(f"- {p}" for p in problems) +

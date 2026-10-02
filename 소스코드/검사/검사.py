@@ -92,6 +92,10 @@ def ensure_tools():
     npm = shutil.which("npm")
     if not shutil.which("node") or not npm:
         return "Node.js 가 없어요 → https://nodejs.org 에서 LTS 버전을 설치한 뒤 다시 실행해 주세요."
+    ok, ver = run(["node", "--version"])
+    major = int(ver.strip().lstrip("v").split(".")[0]) if ok and ver.strip().lstrip("v").split(".")[0].isdigit() else 0
+    if major < 22:      # 화면 시험이 쓰는 WebSocket 은 Node.js 22 부터 기본으로 들어 있음
+        return f"Node.js 22 이상이 필요해요 (지금 {ver.strip() or '알 수 없음'}) → https://nodejs.org 에서 LTS 버전을 설치해 주세요."
     if stamp.get("pkg") != pkg or not os.path.exists(node_js("eslint", "bin", "eslint.js")) or not os.path.exists(node_js("typescript", "bin", "tsc")):
         say("    · 화면 코드 검사 도구 설치 중 (처음 한 번)…")
         shutil.copy(os.path.join(HERE, "package.json"), os.path.join(TOOLS, "package.json"))
@@ -117,8 +121,16 @@ def step_ruff():
 
 
 def step_mypy():
-    return run([venv_bin("mypy"), "--config-file", os.path.join(HERE, "mypy.ini"), "--cache-dir", os.path.join(TOOLS, ".mypy_cache"), *py_files()],
-               env={"MYPYPATH": os.pathsep.join([SRC, TEST])})
+    # 윈도우·리눅스 두 번 확인 — GitHub 자동 검사는 리눅스에서 돌아서, 윈도우 전용 코드가 거기서만 오류날 수 있음
+    outs = []
+    for plat in ("win32", "linux"):
+        ok, out = run([venv_bin("mypy"), "--config-file", os.path.join(HERE, "mypy.ini"), "--platform", plat,
+                       "--cache-dir", os.path.join(TOOLS, ".mypy_cache", plat), *py_files()],
+                      env={"MYPYPATH": os.pathsep.join([SRC, TEST])})
+        outs.append(f"[{plat}] {out.strip()}")
+        if not ok:
+            return False, "\n".join(outs)
+    return True, "\n".join(outs)
 
 
 def step_unittest():
@@ -180,7 +192,7 @@ def main(argv):
     quick = "--빠르게" in argv or "--quick" in argv
     shots = "--사진" in argv or "--shots" in argv
     only = argv[argv.index("--단계") + 1] if "--단계" in argv and argv.index("--단계") + 1 < len(argv) else None
-    steps = [
+    steps = ALL_STEPS = [
         ("파이썬 버그·문법 검사 (ruff)", "ruff", step_ruff),
         ("파이썬 타입 검사 (mypy)", "mypy", step_mypy),
         ("파이썬 시험 (수집·계산·도우미·사이트)", "unittest", step_unittest),
@@ -193,6 +205,11 @@ def main(argv):
         steps = [s for s in steps if s[1] != "browser"]
     if only:
         steps = [s for s in steps if only in s[0] or only == s[1]]
+    if not steps:
+        # 단계 이름을 잘못 치면 아무것도 검사하지 않았는데 '통과'로 보이면 안 됨
+        say(f"  ✗ '{only or ''}' 에 맞는 검사 단계가 없어요. 쓸 수 있는 이름: " + ", ".join(k for _, k, _ in ALL_STEPS)
+            + " (또는 제목 일부: 파이썬, 화면, 크롬 …)" + (" · --빠르게 를 함께 주면 화면 자동 시험은 빠져요" if quick else ""))
+        return 2
     say("━━━━━━━━ AI 모델 성능비교판 전체 검사 ━━━━━━━━")
     t0 = time.time()
     say("[준비] 검사 도구 확인")

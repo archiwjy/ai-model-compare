@@ -20,6 +20,13 @@ const ONLY = argv.includes("--only") ? argv[argv.indexOf("--only") + 1] : null;
 const SHOTS = argv.includes("--shots");
 const SHOT_DIR = process.env.SHOT_DIR || path.join(os.tmpdir(), "ai_compare_shots");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const CMD_MS = 20000, EVAL_MS = 60000, TEST_MS = 150000;   // 크롬 명령 · 페이지 안 시험 코드 · 시험 하나의 시간 제한 (화면이 멈추면 끝없이 기다리지 않게)
+
+// 크롬 원격 조종에 쓰는 WebSocket 은 Node.js 22 부터 기본으로 들어 있음
+if (typeof WebSocket === "undefined") {
+  console.log(`✗ Node.js 22 이상이 필요해요 (지금 ${process.version}). https://nodejs.org 에서 LTS 를 설치해 주세요.`);
+  process.exit(1);
+}
 
 // ───────── 시험용 데이터
 //  · 기본은 고정해 둔 실제 데이터 사진(시험_데이터.json, 2026-10-02) → 날마다 데이터가 바뀌어도 시험 결과는 같음
@@ -28,6 +35,16 @@ const REAL_FILE = process.env.REAL_DATA === "live" ? path.join(WEB, "data.json")
 const REAL = JSON.parse(fs.readFileSync(REAL_FILE, "utf8"));
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const asJs = (d) => "window.MODEL_DATA=" + JSON.stringify(d) + ";\n";
+// 화면의 '오늘'을 시험 데이터 날짜 근처로 고정 (실제 날짜가 지나도 '새로 나온 모델'·'새' 표시·오래된 데이터 안내가 같은 결과)
+//  · 시계는 멈추지 않고 흐름 (그래프 움직임 효과가 정상으로 돎) · REAL_DATA=live 이면 실제 날짜 그대로
+const GEN_MS = Date.parse(String(REAL.generated).replace(" ", "T") + ":00+09:00");
+const clockAt = (hoursAfterGen) => (process.env.REAL_DATA === "live" || !Number.isFinite(GEN_MS) ? null : GEN_MS + hoursAfterGen * 36e5);
+const clockScript = (target) => `(() => {
+  const R = Date, off = ${target} - R.now();
+  function D(...a) { if (!new.target) return new R(R.now() + off).toString(); return a.length ? new R(...a) : new R(R.now() + off); }
+  Object.setPrototypeOf(D, R); D.prototype = R.prototype; D.now = () => R.now() + off;
+  window.Date = D;
+})();`;
 const FIXTURES = {
   real: () => asJs(REAL),
   // 모델이 하나도 없음
@@ -90,6 +107,12 @@ const FIXTURES = {
   syntax: () => 'window.MODEL_DATA = {"generated": "2026-10-02 18:00", "models": [\n',
   // 로컬 도우미(server.py)가 켜져 있는 것처럼 /api 응답
   helper: () => asJs(REAL),
+  // 한 기관을 못 받아 '마지막 정상 데이터'를 보여 주는 중 (13시간 지남 → 안내가 떠야 함)
+  prevdata: () => asJs(Object.assign(clone(REAL), { health: { using_previous: true, failed: ["Artificial Analysis"] } })),
+  // 한 기관을 오래 못 받아 받을 수 있는 기관만으로 계산함 (OpenRouter 는 가격표라 안내에서 뺌)
+  partial: () => asJs(Object.assign(clone(REAL), { health: { failed: ["Epoch AI", "OpenRouter"] } })),
+  // 화면을 다 준비한 뒤(처리기를 붙인 뒤) 오류가 나는 경우 → 오류 화면 뒤에도 키를 눌러 오류가 쌓이면 안 됨
+  latefail: () => asJs(REAL),
 };
 
 // ───────── 시험용 웹 서버
@@ -115,6 +138,12 @@ function startServer() {
       send(200, TYPES[".js"], fxCache[fx]);
     } else if (fx === "noecharts" && p.startsWith("/lib/")) {
       send(404, "text/plain", "없음");
+    } else if (fx === "latefail" && p === "/app.js") {
+      // 시작 끝무렵(처리기를 다 붙인 뒤)에 일부러 오류를 냄
+      const src = fs.readFileSync(path.join(WEB, "app.js"), "utf8");
+      const hook = "    renderFooter();\n";
+      const patched = src.replace(/\r\n/g, "\n").replace(hook, hook + '    throw new Error("시험용 늦은 오류");\n');
+      send(patched.includes("시험용 늦은 오류") ? 200 : 500, TYPES[".js"], patched);
     } else {
       if (p === "/" || p.endsWith("/")) p += "index.html";
       const f = path.resolve(WEB, "." + p);
@@ -169,12 +198,19 @@ class Tab {
     await new Promise((ok, no) => { tab.ws.onopen = ok; tab.ws.onerror = no; });
     tab.ws.onmessage = (m) => {
       const d = JSON.parse(m.data);
-      if (d.id && tab.pending.has(d.id)) { tab.pending.get(d.id)(d); tab.pending.delete(d.id); } else if (d.method) tab.onEvent(d);
+      const p = d.id ? tab.pending.get(d.id) : null;
+      if (p) { clearTimeout(p.timer); tab.pending.delete(d.id); p.resolve(d); } else if (d.method) tab.onEvent(d);
+    };
+    // 연결이 끊기면 기다리던 명령을 모두 실패로 (끝없이 기다리지 않게)
+    tab.ws.onclose = () => {
+      tab.closed = true;
+      for (const p of tab.pending.values()) { clearTimeout(p.timer); p.reject(new Error(`크롬 연결이 끊겼어요 (${p.method})`)); }
+      tab.pending.clear();
     };
     await tab.send("Page.enable"); await tab.send("Runtime.enable"); await tab.send("Log.enable");
     return tab;
   }
-  constructor(port, id, ws) { this.port = port; this.id = id; this.ws = ws; this.n = 0; this.pending = new Map(); this.errors = []; this.loaded = null; }
+  constructor(port, id, ws) { this.port = port; this.id = id; this.ws = ws; this.n = 0; this.pending = new Map(); this.errors = []; this.loaded = null; this.closed = false; }
   onEvent(d) {
     if (d.method === "Page.loadEventFired" && this.loaded) { this.loaded(); this.loaded = null; }
     if (d.method === "Runtime.exceptionThrown") {
@@ -185,10 +221,20 @@ class Tab {
       this.errors.push("console.error: " + d.params.args.map((a) => a.value ?? a.description).join(" "));
     if (d.method === "Log.entryAdded" && d.params.entry.level === "error") this.errors.push(`${d.params.entry.text} ${d.params.entry.url || ""}`);
   }
-  send(method, params = {}) {
-    return new Promise((r) => { const i = ++this.n; this.pending.set(i, r); this.ws.send(JSON.stringify({ id: i, method, params })); });
+  send(method, params = {}, ms = CMD_MS) {
+    return new Promise((resolve, reject) => {
+      if (this.closed) { reject(new Error(`크롬 연결이 끊겼어요 (${method})`)); return; }
+      const i = ++this.n;
+      const timer = setTimeout(() => {
+        this.pending.delete(i);
+        reject(new Error(`크롬 명령이 ${ms / 1000}초 안에 끝나지 않았어요: ${method} — 화면이 멈췄을 수 있어요`));
+      }, ms);
+      this.pending.set(i, { resolve, reject, timer, method });
+      this.ws.send(JSON.stringify({ id: i, method, params }));
+    });
   }
-  async setup(vp) {
+  async setup(vp, clock) {
+    if (clock) await this.send("Page.addScriptToEvaluateOnNewDocument", { source: clockScript(clock) });
     await this.send("Emulation.setDeviceMetricsOverride", { width: vp.w, height: vp.h, deviceScaleFactor: vp.dpr || 1, mobile: !!vp.mobile });
     await this.send("Emulation.setTouchEmulationEnabled", { enabled: !!vp.mobile, maxTouchPoints: vp.mobile ? 5 : 1 });
     if (vp.mobile) await this.send("Emulation.setUserAgentOverride", { userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Mobile Safari/537.36" });
@@ -210,7 +256,7 @@ class Tab {
   // 함수를 페이지 안에서 실행 (함수는 바깥 변수를 쓰지 않는 독립 함수여야 함)
   async eval(fn, ...args) {
     const expression = `(${fn.toString()})(...${JSON.stringify(args)})`;
-    const r = await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+    const r = await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, EVAL_MS);
     if (r.result && r.result.exceptionDetails) {
       const x = r.result.exceptionDetails;
       throw new Error("페이지 안 시험 코드 오류: " + ((x.exception && x.exception.description) || x.text));
@@ -235,7 +281,10 @@ class Tab {
     const r = await this.send("Page.captureScreenshot", { format: "png" });
     fs.writeFileSync(path.join(SHOT_DIR, name + ".png"), Buffer.from(r.result.data, "base64"));
   }
-  async close() { try { this.ws.close(); } catch { /* 이미 닫힘 */ } await fetch(`http://127.0.0.1:${this.port}/json/close/${this.id}`).catch(() => {}); }
+  async close() {
+    try { this.ws.close(); } catch { /* 이미 닫힘 */ }
+    await Promise.race([fetch(`http://127.0.0.1:${this.port}/json/close/${this.id}`).catch(() => {}), sleep(5000)]);
+  }
 }
 
 // ───────── 페이지 안에서 쓰는 공통 점검들 (독립 함수)
@@ -296,6 +345,12 @@ const TESTS = [
       ok(!b.empty, "빈 그래프 안내는 숨김");
       const o = await t.eval(IN_PAGE.overflow);
       ok(o.scroll <= 0 && !o.over.length, "가로 넘침 없음", JSON.stringify(o));
+      // 화면 시계를 시험 데이터 날짜에 고정했으니 '새로 나온 모델'이 늘 보여야 함
+      const tk = await t.eval(() => ({ hidden: document.querySelector("#ticker").hidden, n: document.querySelectorAll("#ticker .tk-item").length }));
+      ok(!tk.hidden && tk.n >= 1, "새로 나온 모델 목록", JSON.stringify(tk));
+      // 넓은 PC 화면: 지도는 옆에 붙어 있음
+      const st = await t.eval(() => getComputedStyle(document.querySelector(".col-map")).position);
+      ok(st === "sticky", "넓은 화면에서 지도가 옆에 붙음", st);
       await t.shot("pc_light");
     },
   },
@@ -461,7 +516,191 @@ const TESTS = [
       ok(c.theme === "dark" && c.bg === "rgb(10, 10, 10)" && c.meta === "#0b0b0b", "어두운 색 적용", JSON.stringify(c));
       const b = await t.eval(IN_PAGE.basics);
       ok(b.pins >= 2 && b.series > 5, "어둡게에서도 그래프·핀", JSON.stringify(b));
+      // 화면 읽기 프로그램용 이름은 그대로, 켜졌는지는 눌림 상태로
+      const a = await t.eval(() => ({ label: document.querySelector("#themeBtn").getAttribute("aria-label"), pressed: document.querySelector("#themeBtn").getAttribute("aria-pressed") }));
+      ok(a.label === "어둡게 보기" && a.pressed === "true", "밝게/어둡게 버튼: 이름 고정 + 눌림 상태", JSON.stringify(a));
       await t.shot("pc_dark");
+    },
+  },
+  {
+    name: "PC 키보드 초점 · 상세를 닫으면 연 자리로",
+    fx: "real", vp: DESK,
+    async run(t, ok) {
+      const where = () => t.eval(() => {
+        const a = document.activeElement;
+        const host = a && a.closest ? a.closest("#cards, #notes, #pinBar, #table, #headline, #ticker") : null;
+        const card = a && a.closest ? a.closest(".pick") : null;
+        return { host: host ? host.id : null, tag: a ? a.tagName : null, key: (a && a.dataset && a.dataset.key) || null, eff: (a && a.dataset && a.dataset.eff) || null, card: card ? card.dataset.kind : null };
+      });
+      // 가성비 카드 첫 줄 Enter → 상세 → Esc → 초점이 가성비 카드의 그 줄로 (최고 성능 카드에 같은 줄이 있어도)
+      await t.eval(() => { window.scrollTo(0, 0); document.querySelector('.pick[data-kind="value"] .vt-row').focus(); });
+      const before = await where();
+      await t.key("Enter"); await sleep(400);
+      ok(await t.eval(() => document.querySelector("#detail").classList.contains("open")), "카드 줄 Enter → 상세");
+      await t.key("Escape"); await sleep(400);
+      const after = await where();
+      ok(after.host === "cards" && after.card === "value" && after.key === before.key && after.eff === before.eff, "Esc 뒤 초점 = 연 카드 줄", JSON.stringify([before, after]));
+      // 각주 버튼에서 연 상세 → 닫으면 각주로
+      await t.eval(() => document.querySelector("#notes .note-btn").focus());
+      const nb = await where();
+      await t.key("Enter"); await sleep(400);
+      await t.key("Escape"); await sleep(400);
+      const na = await where();
+      ok(na.host === "notes" && na.key === nb.key, "각주에서 연 상세를 닫으면 각주로", JSON.stringify([nb, na]));
+      // 순위표 줄: Enter 두 번(고정 → 해제) 뒤에도 초점이 그 줄 (고정 표시 클래스가 빠져도 찾음)
+      await t.eval(() => { const c = document.querySelector("#pinBar .pin-clear"); if (c) c.click(); });
+      await sleep(200);
+      await t.eval(() => document.querySelector("#table tbody tr[data-key]").focus());
+      const tb = await where();
+      await t.key("Enter"); await sleep(300);
+      await t.key("Enter"); await sleep(300);
+      const ta = await where();
+      ok(ta.host === "table" && ta.tag === "TR" && ta.key === tb.key, "표 줄 고정 → 해제 뒤에도 초점이 그 줄", JSON.stringify([tb, ta]));
+    },
+  },
+  {
+    name: "PC 경계선 끄기 · 회사마다 1개",
+    fx: "real", vp: DESK,
+    async run(t, ok) {
+      const r = await t.eval(async () => {
+        const w = (ms = 250) => new Promise((res) => setTimeout(res, ms));
+        const q = (s) => document.querySelector(s);
+        const keys = () => new Set([...document.querySelectorAll("#table tbody tr[data-key]")].map((tr) => tr.dataset.key)).size;
+        q('#perCoMenu .menu-item[data-v="1"]').click(); await w();
+        const on = keys();
+        q("#optFrontier").click(); await w();
+        const off = keys();
+        const inp = q("#search"); inp.value = "claude"; inp.dispatchEvent(new Event("input")); await w(450);
+        const note = q("#searchNote").innerText;
+        inp.value = ""; inp.dispatchEvent(new Event("input")); await w(350);
+        q("#optFrontier").click(); await w();
+        return { on, off, note };
+      });
+      ok(r.off < r.on, "경계선을 끄면 경계선 때문에 더한 모델이 빠짐", JSON.stringify(r));
+      ok(!/경계선/.test(r.note), "경계선을 끄면 검색 안내에 '경계선' 문구 없음", r.note);
+    },
+  },
+  {
+    name: "PC 그래프 · 가로축 바꾸면 확대 풀림 · 마우스 뒤 방향키 · Esc 순서",
+    fx: "real", vp: DESK,
+    async run(t, ok) {
+      const z = await t.eval(async () => {
+        const w = (ms = 300) => new Promise((res) => setTimeout(res, ms));
+        const q = (s) => document.querySelector(s);
+        const other = () => [...document.querySelectorAll("#xAxisSeg button")].find((b) => !b.classList.contains("on"));
+        window.scrollTo(0, 0);
+        q("#zoomIn").click(); await w(); q("#zoomIn").click(); await w(500);
+        const zoomed = q("#chart").classList.contains("zoomed");
+        other().click(); await w(600);
+        const after = q("#chart").classList.contains("zoomed");
+        other().click(); await w(400);      // 원래 가로축으로
+        return { zoomed, after };
+      });
+      ok(z.zoomed && !z.after, "가로축을 바꾸면 확대가 풀림", JSON.stringify(z));
+      // 그래프의 점을 마우스로 누름(고정) → ↓ 키는 페이지 스크롤 (그래프가 방향키를 가로채지 않음)
+      const pt = await t.eval(() => {
+        const ch = echarts.getInstanceByDom(document.querySelector("#chart"));
+        const c = document.querySelector("#chart").getBoundingClientRect();
+        for (const s of ch.getModel().getSeries()) {
+          const d = s.getData();
+          for (let i = 0; i < d.count(); i++) {
+            const raw = d.getRawDataItem(i);
+            const l = raw && raw.v && raw.value ? ch.convertToPixel({ seriesIndex: s.componentIndex }, raw.value) : null;
+            if (Array.isArray(l) && l[0] > 40 && l[1] > 40 && l[0] < c.width - 40 && l[1] < c.height - 60) return { x: c.left + l[0], y: c.top + l[1] };
+          }
+        }
+        return null;
+      });
+      ok(pt, "누를 점 찾기", JSON.stringify(pt));
+      if (pt) {
+        await t.click(pt.x, pt.y); await sleep(400);
+        const y0 = await t.eval(() => ({ y: window.scrollY, focus: document.activeElement && document.activeElement.id }));
+        await t.key("ArrowDown"); await t.key("ArrowDown"); await t.key("ArrowDown"); await sleep(400);
+        const y1 = await t.eval(() => window.scrollY);
+        ok(y1 > y0.y, "마우스로 누른 뒤 ↓ 키 = 페이지가 내려감", JSON.stringify([y0, y1]));
+        await t.key("Escape"); await sleep(300);
+      }
+      // 크게 보기 위에 연 상세 → Esc 는 상세부터
+      const e = await t.eval(async () => {
+        const w = (ms = 350) => new Promise((res) => setTimeout(res, ms));
+        const q = (s) => document.querySelector(s);
+        window.scrollTo(0, 0);
+        if (q("#detail").classList.contains("open")) { q("#closeDetail").click(); await w(); }
+        q("#fullBtn").click(); await w();
+        q(".pick .vt-row").click(); await w();
+        return { full: q("#chartBox").classList.contains("full"), detail: q("#detail").classList.contains("open") };
+      });
+      ok(e.full && e.detail, "크게 보기 + 상세", JSON.stringify(e));
+      await t.key("Escape"); await sleep(400);
+      const e1 = await t.eval(() => ({ full: document.querySelector("#chartBox").classList.contains("full"), detail: document.querySelector("#detail").classList.contains("open") }));
+      ok(e1.full && !e1.detail, "Esc 한 번 = 맨 위의 상세만 닫힘", JSON.stringify(e1));
+      await t.key("Escape"); await sleep(400);
+      ok(await t.eval(() => !document.querySelector("#chartBox").classList.contains("full")), "Esc 두 번 = 크게 보기도 닫힘");
+    },
+  },
+  {
+    name: "PC 건너뛰기 링크",
+    fx: "real", vp: DESK,
+    async run(t, ok) {
+      await t.eval(() => { document.activeElement && document.activeElement.blur(); window.scrollTo(0, 0); });
+      await t.key("Tab");
+      ok(await t.eval(() => document.activeElement && document.activeElement.classList.contains("skip")), "첫 Tab = 본문으로 건너뛰기");
+      await t.key("Enter"); await sleep(500);
+      const r = await t.eval(() => ({ label: Math.round(document.querySelector(".hl-label").getBoundingClientRect().top), bar: Math.round(document.querySelector(".topbar").getBoundingClientRect().bottom) }));
+      ok(r.label >= r.bar - 1, "건너뛴 뒤 '오늘의 답'이 머리칸에 가리지 않음", JSON.stringify(r));
+    },
+  },
+  {
+    name: "낮은 PC 화면 (노트북 창 1366×657)",
+    fx: "real", vp: { w: 1366, h: 657 },
+    async run(t, ok) {
+      const r = await t.eval(() => ({
+        spread: getComputedStyle(document.querySelector(".spread")).display,
+        map: getComputedStyle(document.querySelector(".col-map")).position,
+        chartH: Math.round(document.querySelector("#chart").getBoundingClientRect().height),
+      }));
+      ok(r.spread === "flex" && r.map === "static", "위아래 배치 (왼쪽이 비지 않음)", JSON.stringify(r));
+      ok(r.chartH >= 400, "그래프가 찌그러지지 않음 (400px 이상)", JSON.stringify(r));
+      const o = await t.eval(IN_PAGE.overflow);
+      ok(o.scroll <= 0 && !o.over.length, "가로 넘침 없음", JSON.stringify(o));
+      await t.shot("pc_low");
+    },
+  },
+  {
+    name: "마지막 정상 데이터 안내 · 알림이 조절 막대를 가리지 않음",
+    fx: "prevdata", vp: DESK, clockHours: 13,
+    async run(t, ok) {
+      const n = await t.eval(() => document.querySelector("#notice").innerText);
+      ok(/Artificial Analysis/.test(n) && /정상 데이터/.test(n), "어떤 기관을 못 받았는지 안내", n);
+      const r = await t.eval(async () => {
+        window.scrollTo(0, 1200);
+        await new Promise((res) => setTimeout(res, 400));
+        const b = document.querySelector("#dock .dock-in").getBoundingClientRect();
+        const hit = document.elementFromPoint(b.left + 30, b.top + Math.min(20, b.height / 2));
+        return { underNotice: !!(hit && hit.closest("#notice")), hit: hit ? hit.tagName + "." + hit.className : null };
+      });
+      ok(!r.underNotice, "스크롤해도 알림이 지도 조절 막대를 덮지 않음", JSON.stringify(r));
+    },
+  },
+  {
+    name: "일부 기관만으로 계산 안내 (휴대폰)",
+    fx: "partial", vp: PHONE,
+    async run(t, ok) {
+      const n = await t.eval(() => document.querySelector("#notice").innerText);
+      ok(/Epoch AI/.test(n) && !/OpenRouter/.test(n), "점수 기관만 안내 (가격표 OpenRouter 는 뺌)", n);
+      const o = await t.eval(IN_PAGE.overflow);
+      ok(o.scroll <= 0 && !o.over.length, "가로 넘침 없음", JSON.stringify(o));
+    },
+  },
+  {
+    name: "시작 뒤 오류 → 오류 화면 · 키를 눌러도 오류가 더 쌓이지 않음",
+    fx: "latefail", vp: DESK, allow: [/시험용 늦은 오류/],
+    async run(t, ok, info) {
+      ok(info.state === "fatal", "오류 화면 표시", info.state);
+      await t.key("Escape"); await t.key("/"); await t.key("ArrowDown");
+      await t.send("Emulation.setDeviceMetricsOverride", { width: 1000, height: 800, deviceScaleFactor: 1, mobile: false });
+      await sleep(800);
+      ok(await t.eval(() => /새로고침/.test(document.body.innerText)), "새로고침 안내");
     },
   },
   {
@@ -473,6 +712,26 @@ const TESTS = [
       const b = await t.eval(IN_PAGE.basics);
       ok(b.lines >= 2 && b.series > 5, "문장·그래프", JSON.stringify(b));
       await t.shot("tablet");
+    },
+  },
+  {
+    // 작은 휴대폰(320px) — 글꼴이 넓게 그려지는 컴퓨터(리눅스 등)에서도 아래 막대가 화면 밖으로 밀리면 안 됨
+    name: "아주 좁은 휴대폰",
+    fx: "real", vp: { w: 320, h: 640, mobile: true, dpr: 2 },
+    async run(t, ok) {
+      const o = await t.eval(IN_PAGE.overflow);
+      ok(o.scroll <= 0 && !o.over.length, "가로 넘침 없음", JSON.stringify(o));
+      const d = await t.eval(() => {
+        const W = document.documentElement.clientWidth;
+        const r = (s) => document.querySelector(s).getBoundingClientRect();
+        return { W, dock: Math.round(r(".dock").right), toggle: Math.round(r(".dock-toggle").right), search: Math.round(r("#search").width) };
+      });
+      ok(d.dock <= d.W && d.toggle <= d.W && d.search >= 60, "아래 막대가 화면 안 · 찾기 칸 남음", JSON.stringify(d));
+      await t.eval(async () => {
+        document.querySelector(".notes").scrollIntoView({ block: "center", behavior: "instant" });
+        await new Promise((res) => setTimeout(res, 300));
+      });
+      await t.shot("phone_narrow");
     },
   },
   {
@@ -491,19 +750,30 @@ const TESTS = [
         q("#dockScrim").click(); await w(); log.closed = !q("#dock").classList.contains("open") && !document.body.classList.contains("sheet-open");
         q("#table tbody tr").click(); await w(300);
         log.rowPinned = qa("#pinBar .pin").length === 1 && !q("#detail").classList.contains("open");   // 표 줄 = 고정만
-        q(".pick .vt-row").click(); await w(500);
-        const det = q("#detail"); log.detail = det.classList.contains("open");
-        const dr = det.getBoundingClientRect(); log.detailInView = dr.top < innerHeight && dr.bottom > 0;
+        // 상세 판은 아래에서 올라오는 움직임이 있음 → 고정 시간 대신 '화면 안에 들어올 때까지' 최대 3초 기다림 (느린 컴퓨터에서도 같은 결과)
+        const until = async (fn, ms = 3000) => { const t0 = performance.now(); while (performance.now() - t0 < ms) { if (fn()) return true; await w(50); } return fn(); };
+        const row = q(".pick .vt-row");
+        row.focus(); row.click();          // 터치하면 초점도 그 줄로 감 (초점이 왔다고 말풍선을 띄우면 안 됨)
+        const det = q("#detail");
+        log.detailInView = await until(() => { const dr = det.getBoundingClientRect(); return det.classList.contains("open") && dr.top < innerHeight - 40 && dr.bottom > 0; });
+        log.detail = det.classList.contains("open");
+        // 그래프 말풍선: 그래프 도구가 상자를 미리 만들어 두므로 '글이 들어 있고 보이는지'로 판단
+        const tipShown = () => { const tip = q("#chart .chart-tip"); if (!tip || !tip.innerText.trim()) return false; const cs = getComputedStyle(tip); return cs.display !== "none" && cs.visibility !== "hidden" && +cs.opacity > 0; };
+        await w(400);
+        log.noTip = !tipShown();
+        // 작은 터치 대상 (44px 미만인 주요 버튼 — 열린 상세의 닫기·고정 칩 × 포함)
+        const sizes = (sel) => qa(sel).filter((b) => b.offsetParent).map((b) => { const r2 = b.getBoundingClientRect(); return { id: b.id || b.className || b.tagName, w: Math.round(r2.width), h: Math.round(r2.height) }; });
+        log.small = sizes(".circ, .cbtn, .dock-toggle, #closeDetail, .pin .x, .pin-name").filter((x) => x.w < 44 || x.h < 44);
         q("#closeDetail").click(); await w();
-        // 작은 터치 대상 (44px 미만인 주요 버튼)
-        log.small = qa(".circ, .cbtn, .dock-toggle, #closeDetail").filter((b) => b.offsetParent).map((b) => { const r2 = b.getBoundingClientRect(); return { id: b.id || b.className, w: Math.round(r2.width), h: Math.round(r2.height) }; }).filter((x) => x.w < 44 || x.h < 44);
+        log.smallMore = sizes(".pick-why summary, .notes .note-btn").filter((x) => x.h < 44);
         return log;
       });
       ok(r.dockBottom >= 0 && r.dockBottom < 60, "아래쪽 조절 막대", r.dockBottom);
       ok(r.open && r.cost && r.closed, "조절 판 열고 닫기", JSON.stringify(r));
       ok(r.rowPinned, "표 줄 → 고정만 (상세가 표를 덮지 않음)", JSON.stringify(r));
       ok(r.detail && r.detailInView, "카드 줄 → 상세 판", JSON.stringify(r));
-      ok(!r.small.length, "주요 버튼 터치 크기 44px 이상", JSON.stringify(r.small));
+      ok(r.noTip, "터치로 연 상세에는 그래프 말풍선이 같이 뜨지 않음", JSON.stringify(r));
+      ok(!r.small.length && !r.smallMore.length, "누르는 곳 터치 크기 44px 이상", JSON.stringify([r.small, r.smallMore]));
       await t.shot("phone");
     },
   },
@@ -515,6 +785,10 @@ const TESTS = [
       const r = await t.eval(() => { const c = document.querySelector("#chartBox").getBoundingClientRect(), ch = document.querySelector("#chart").getBoundingClientRect(); return { full: document.querySelector("#chartBox").classList.contains("full"), h: Math.round(c.height), chartH: Math.round(ch.height), vh: innerHeight }; });
       ok(r.full && r.h <= r.vh + 1 && r.chartH > 200, "가로 화면 가득", JSON.stringify(r));
       await t.shot("landscape_full");
+      // 머리칸이 붙지 않는 낮은 화면: 표 머리줄도 맨 위에 붙어야 함 (위에 표 줄이 비쳐 보이지 않게)
+      await t.eval(() => document.querySelector("#fullBtn").click()); await sleep(500);
+      const th = await t.eval(() => getComputedStyle(document.querySelector("#table th")).top);
+      ok(th === "0px", "표 머리줄이 맨 위에 붙음", th);
     },
   },
   {
@@ -666,12 +940,17 @@ try {
     let tab;
     try {
       tab = await Tab.open(chrome.port);
-      await tab.setup(T.vp);
-      const info = await tab.goto(`${base}/fx/${T.fx || "real"}/index.html`, T.readyMs || 8000);
-      if (!["noecharts", "missing", "garbage", "syntax"].includes(T.fx)) ok(info.state === "1", "화면 준비 완료 표시", info.state || "(없음)");
-      await sleep(T.settle || 700);
-      await T.run(tab, ok, info);
-      await sleep(300);
+      await tab.setup(T.vp, clockAt(T.clockHours ?? 2));
+      const body = async () => {
+        const info = await tab.goto(`${base}/fx/${T.fx || "real"}/index.html`, T.readyMs || 8000);
+        if (!["noecharts", "missing", "garbage", "syntax", "latefail"].includes(T.fx)) ok(info.state === "1", "화면 준비 완료 표시", info.state || "(없음)");
+        await sleep(T.settle || 700);
+        await T.run(tab, ok, info);
+        await sleep(300);
+      };
+      let timer;
+      await Promise.race([body(), new Promise((_, no) => { timer = setTimeout(() => no(new Error(`시험 하나가 ${TEST_MS / 1000}초 안에 끝나지 않았어요 (화면이 멈췄을 수 있어요)`)), TEST_MS); })])
+        .finally(() => clearTimeout(timer));
       const allow = (T.allow || []).concat([/cdn\.jsdelivr\.net|pretendard/i]);   // 바깥 글꼴은 인터넷 상태에 따라 실패할 수 있음 (화면은 기본 글꼴로 동작)
       const errs = tab.errors.filter((e) => !allow.some((re) => re.test(e)));
       ok(!errs.length, "콘솔 오류 0개", errs.join(" | "));

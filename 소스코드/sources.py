@@ -167,7 +167,11 @@ def _dict(x) -> dict:
 
 
 def _check_zip(data):
-    zipfile.ZipFile(io.BytesIO(data)).testzip()
+    """압축 파일 속 파일들이 모두 멀쩡한지 (testzip 은 깨진 파일 이름을 돌려줄 뿐 오류를 내지 않음)"""
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        bad = zf.testzip()
+    if bad:
+        raise zipfile.BadZipFile(f"압축 파일 속 '{bad}' 가 깨짐 (검사값 불일치) → 받아 둔 원본을 덮어쓰지 않음")
 
 
 def _check_json(data):
@@ -490,6 +494,17 @@ def load_aa(exclude_words):
 
 
 # ───────────────────────── OpenRouter 가격표 ─────────────────────────
+def _created_date(v):
+    """등록 시각(초) → 'YYYY-MM-DD'. 이상한 값(음수·먼 미래·변환 실패)이면 날짜만 비움 (그 모델의 가격은 그대로 씀)"""
+    t = _num(v)
+    if t is None or not 0 < t < 4e9:       # 4e9초 ≈ 2096년
+        return None
+    try:
+        return time.strftime("%Y-%m-%d", time.gmtime(t))
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def load_openrouter():
     url, name = "https://openrouter.ai/api/v1/models", "openrouter_models.json"
     used = []
@@ -513,15 +528,18 @@ def load_openrouter():
         pin, pout = _num(pr.get("prompt")), _num(pr.get("completion"))
         if pin is None or pout is None or pin < 0 or pout < 0 or (pin == 0 and pout == 0):
             continue
+        # 토큰당 → 100만 토큰당. 터무니없이 큰 값은 무한대가 되어 data.js 쓰기가 통째로 실패하므로 그 줄만 건너뜀
+        pin, pout = pin * 1e6, pout * 1e6
+        if not (math.isfinite(pin) and math.isfinite(pout)):
+            continue
         base, eff = split_name(mid)
         if not base or eff not in ("default", "thinking"):
             # 이름에 등급이 붙은 특수 상품은 건너뜀
             continue
         rs = _dict(m.get("reasoning"))
-        created = _num(m.get("created"))
         efforts = rs.get("supported_efforts")
-        rec = {"id": mid, "in": pin * 1e6, "out": pout * 1e6, "name": m.get("name") if isinstance(m.get("name"), str) else None,
-               "created": time.strftime("%Y-%m-%d", time.gmtime(created)) if created and created > 0 else None,
+        rec = {"id": mid, "in": pin, "out": pout, "name": m.get("name") if isinstance(m.get("name"), str) else None,
+               "created": _created_date(m.get("created")),
                "efforts": [str(e) for e in efforts if isinstance(e, str)] if isinstance(efforts, list) else [],
                "default_effort": rs.get("default_effort") if isinstance(rs.get("default_effort"), str) else None,
                "reasoning_mandatory": rs.get("mandatory") if isinstance(rs.get("mandatory"), bool) else None}

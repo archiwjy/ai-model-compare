@@ -134,7 +134,7 @@ def _effort_from_text(text):
     if _NEG.search(t):
         return "none"
     for word, eff in [("ultra", "ultra"), ("xhigh", "xhigh"), ("extra high", "xhigh"), ("extra-high", "xhigh"),
-                      ("maximum", "max"), ("max", "max"), ("minimal", "minimal"), ("medium", "medium"),
+                      ("maximum", "max"), ("promax", "max"), ("max", "max"), ("minimal", "minimal"), ("medium", "medium"),
                       ("high", "high"), ("low", "low"), ("none", "none")]:
         if re.search(r"(?<![a-z])" + re.escape(word) + r"(?![a-z])", t):
             return eff
@@ -169,7 +169,8 @@ def split_name(raw):
         e = _effort_from_text(m.group(1))
         if e:
             found.append(e)
-        if re.search(r"(?<![a-z])pro(?![a-z])", m.group(1).lower()) and e:
+        # '(Pro Max)'·'(ProMax)' = Pro 모델의 최대 (하이픈형 '-promax'·밑줄형 '_promax' 와 같게)
+        if re.search(r"(?<![a-z])pro(?:max)?(?![a-z])", m.group(1).lower()) and e:
             pro = True
     if found:
         effort = "none" if "none" in found else found[0]
@@ -206,7 +207,6 @@ def split_name(raw):
     s = _slug(s)
     s = _DATE8.sub("", s)
     s = _claude_order(s)
-    s = re.sub(r"-it$", "-instruct", s)          # Gemma 식 '-it'(지시 학습) = 다른 곳의 'Instruct'
 
     # 4) 끝에서부터 등급/군더더기 단어 떼어내기
     parts = s.split("-") if s else []
@@ -249,7 +249,9 @@ def split_name(raw):
             parts = parts[:-1]
             continue
         break
-    base = "-".join(parts)
+    # Gemma 식 '-it'(지시 학습) = 다른 곳의 'Instruct'
+    #  (등급을 뗀 뒤에 바꿔야 'gemma-3-27b-it-high' 와 'gemma-3-27b-it_high' 가 같은 이름이 됨)
+    base = re.sub(r"-it$", "-instruct", "-".join(parts))
     # 이름이 비었거나 등급·군더더기 단어뿐이면 모델이 아님
     if not base or not re.search(r"[a-z0-9]", base) or base in _EFFORT_WORDS or base in _NOISE_WORDS or base in _THINK_WORDS:
         return None, None
@@ -272,7 +274,10 @@ def pretty_name(base):
     while i < len(parts):
         p = parts[i]
         nxt = parts[i + 1] if i + 1 < len(parts) else ""
-        if re.fullmatch(r"\d{1,2}", p) and re.fullmatch(r"\d+(\.\d+)?[bmk]", nxt):   # 0-6b → 0.6B (크기)
+        # 소수점 크기: 0-6b → 0.6B, 또는 버전이 이미 '4.0' 처럼 끝났을 때 exaone-4-0-1-2b → 4.0 1.2B
+        #  (그 밖엔 버전의 소수점: llama-3-1-8b → Llama 3.1 8B, gemma-3-4b → Gemma 3 4B)
+        if (re.fullmatch(r"\d{1,2}", p) and re.fullmatch(r"\d+(\.\d+)?[bmk]", nxt)
+                and (p == "0" or (out and re.fullmatch(r"\d+\.\d+", out[-1])))):
             out.append(f"{p}.{nxt[:-1]}{nxt[-1].upper()}")
             i += 2
             continue

@@ -36,7 +36,8 @@ def files_to_publish():
                     continue
                 rel = os.path.relpath(os.path.join(root, f), HERE).replace(os.sep, "/")
                 out.append((rel, "소스코드/" + rel))
-    for f in sorted(os.listdir(os.path.join(HERE, "사이트_설정"))):
+    conf = os.path.join(HERE, "사이트_설정")      # GitHub 저장소 안에는 이 폴더가 없음 (.github/workflows 로 들어가 있음)
+    for f in sorted(os.listdir(conf)) if os.path.isdir(conf) else ():
         if f.endswith(".yml"):
             out.append((f"사이트_설정/{f}", f".github/workflows/{f}"))
     return out
@@ -75,9 +76,32 @@ def copy_files(files):
             print(f"목록에서 빠진 옛 파일 {len(stale)}개를 저장소에서 지웠어요: {', '.join(stale[:5])}{' …' if len(stale) > 5 else ''}")
 
 
+def _rebase_in_progress():
+    return any(os.path.exists(os.path.join(REPO, ".git", d)) for d in ("rebase-merge", "rebase-apply"))
+
+
+def current_branch():
+    """지금 브랜치 이름 — 커밋이 하나도 없는 새 저장소에서도 동작 (rev-parse 는 새 저장소에서 오류)"""
+    name = git("symbolic-ref", "--short", "-q", "HEAD", check=False)
+    if not name:
+        raise RuntimeError("저장소가 특정 브랜치에 있지 않아요 (중간에 멈춘 작업이 남아 있음). "
+                           f"'{REPO}' 에서 git status 로 상태를 확인해 주세요.")
+    return name
+
+
+def pull_rebase(branch):
+    """GitHub 쪽 새 기록을 먼저 받아 내 기록을 그 위에 얹음. 합칠 수 없으면 원래대로 되돌리고 알림"""
+    try:
+        git("pull", "--rebase", "origin", branch)
+    except RuntimeError:
+        git("rebase", "--abort", check=False)      # 반쯤 합쳐진 상태로 남지 않게 (내 기록은 그대로 보존)
+        raise RuntimeError("GitHub 쪽에서도 같은 파일이 바뀌어 자동으로 합칠 수 없어요 (예: GitHub 웹에서 README 를 고침). "
+                           f"원래 상태로 되돌려 놓았어요. '{REPO}' 에서 git pull 로 직접 합친 뒤 다시 실행해 주세요.") from None
+
+
 def run_checks():
     """전체 검사 실행 → 통과하면 True"""
-    print("전체 검사를 먼저 돌립니다 (통과해야 올림)…\n")
+    print("전체 검사를 먼저 돌립니다 (통과해야 올림)…\n", flush=True)
     r = subprocess.run([sys.executable, "-B", os.path.join(HERE, "검사", "검사.py")], cwd=HERE, check=False)
     return r.returncode == 0
 
@@ -93,8 +117,11 @@ def main():
         if not os.path.exists(os.path.join(REPO, ".git")):
             os.makedirs(REPO, exist_ok=True)
             git("init", "-b", "main")
+        if _rebase_in_progress():               # 예전 실행이 합치기 도중에 멈춘 흔적 → 먼저 되돌림
+            git("rebase", "--abort", check=False)
+            print("지난번에 멈춘 합치기 작업을 원래대로 되돌렸어요.")
+        branch = current_branch()
         copy_files(files_to_publish())
-        branch = git("rev-parse", "--abbrev-ref", "HEAD") or "main"
         remote = git("remote", check=False)
         remote_has = False
         if remote:
@@ -105,7 +132,7 @@ def main():
                 git("add", "-A")
                 if git("status", "--porcelain"):
                     git("commit", "-m", msg)
-                git("pull", "--rebase", "origin", branch)
+                pull_rebase(branch)
         git("add", "-A")
         if git("status", "--porcelain"):
             git("commit", "-m", msg)

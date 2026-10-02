@@ -3,6 +3,7 @@
 import csv
 import io
 import json
+import math
 import os
 import time
 import unittest
@@ -20,6 +21,14 @@ def _csv(rows):
     w.writeheader()
     for r in rows:
         w.writerow(r)
+    return buf.getvalue()
+
+
+def _stored_zip(body):
+    """압축하지 않은(ZIP_STORED) 파일 하나짜리 zip"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as z:
+        z.writestr("data/a.csv", body)
     return buf.getvalue()
 
 
@@ -82,6 +91,25 @@ class Fetch(unittest.TestCase):
             # 시도 횟수 0 이어도 'None 을 raise' 같은 엉뚱한 오류가 아니라 이해할 수 있는 오류
             with self.assertRaises(OSError):
                 sources.fetch("http://x", "t.bin", attempts=0)
+
+    def test_crc_broken_zip_does_not_replace_good_original(self):
+        # 압축 파일 속 데이터가 깨졌는데(검사값 불일치) 예전엔 통과시켜 받아 둔 정상 원본을 덮어썼음
+        good = _stored_zip(b"model,score\nA,1\n" * 20)
+        bad = bytearray(good)
+        i = bad.index(b"A,1")
+        bad[i] = ord("B")                         # 내용 한 글자만 바꿈 (압축하지 않은 형식이라 그대로 들어 있음)
+        with self.assertRaises(zipfile.BadZipFile):
+            sources._check_zip(bytes(bad))
+        sources._check_zip(good)                  # 멀쩡한 것은 통과
+        with open(self.path, "wb") as f:
+            f.write(good)
+        old = time.time() - 5 * 3600              # 새로 받을 때가 된 (하지만 아직 쓸 수 있는) 원본
+        os.utime(self.path, (old, old))
+        with mock.patch.object(sources, "_download", return_value=bytes(bad)), mock.patch("time.sleep"):
+            got = sources.fetch("http://x", "t.bin", validate=sources._check_zip)
+        self.assertEqual(got, good)
+        with open(self.path, "rb") as f:
+            self.assertEqual(f.read(), good)
 
     def test_cache_name_cannot_escape_folder(self):
         with mock.patch("urllib.request.urlopen", side_effect=OSError("끊김")), mock.patch("time.sleep"), self.assertRaises((OSError, ValueError)):
@@ -181,6 +209,33 @@ class OpenRouter(unittest.TestCase):
         self.assertIsNone(out["ts"]["created"])
         self.assertNotIn("free", out)
         self.assertNotIn("neg", out)
+
+    def test_huge_values_skip_only_that_row(self):
+        # 100만 배 하면 무한대가 되는 가격·변환할 수 없는 등록 시각 → 그 줄(또는 날짜)만 건너뛰고 나머지는 받음
+        #  (예전엔 무한대 가격이 그대로 들어가 data.js 쓰기가 통째로 실패할 수 있었음)
+        data = {"data": [
+            {"id": "x/huge", "pricing": {"prompt": "1e303", "completion": "0.000001"}},
+            {"id": "x/future", "pricing": {"prompt": "0.000001", "completion": "0.000002"}, "created": 1e20},
+            {"id": "x/past", "pricing": {"prompt": "0.000001", "completion": "0.000002"}, "created": -5},
+            {"id": "x/ok", "pricing": {"prompt": "0.000001", "completion": "0.000002"}, "created": 1758000000},
+        ]}
+        with mock.patch.object(sources, "fetch", FakeNet({"openrouter": json.dumps(data)})):
+            out = sources.load_openrouter()["prices"]
+        self.assertNotIn("huge", out)
+        self.assertEqual(set(out), {"future", "past", "ok"})
+        self.assertIsNone(out["future"]["created"])
+        self.assertIsNone(out["past"]["created"])
+        self.assertEqual(out["ok"]["created"], "2025-09-16")
+        for p in out.values():
+            self.assertTrue(math.isfinite(p["in"]) and math.isfinite(p["out"]))
+        json.dumps(out, allow_nan=False)          # 그대로 파일로 쓸 수 있어야 함
+
+    def test_created_date_odd_values(self):
+        for v in (None, "어제", 0, -1, 4e9, 1e300, float("inf"), float("nan"), True):
+            with self.subTest(v=v):
+                self.assertIsNone(sources._created_date(v))
+        with mock.patch("time.gmtime", side_effect=OSError("변환 실패")):
+            self.assertIsNone(sources._created_date(1758000000))
 
 
 class Epoch(unittest.TestCase):

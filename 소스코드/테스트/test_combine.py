@@ -1,7 +1,10 @@
 # 종합 점수·비용 계산(combine.py) 시험 — 답을 아는 가짜 데이터로 계산이 맞는지 확인
 import math
 import random
+import statistics
 import unittest
+from typing import ClassVar
+from unittest import mock
 
 import testutil  # noqa: F401
 import combine
@@ -141,6 +144,94 @@ class Costs(unittest.TestCase):
         self.assertLess(lad["low"], lad["high"])
         self.assertLess(lad["high"], lad["max"])
         self.assertTrue(all(math.isfinite(v) for v in lad.values()))
+
+    # 비용 출처끼리 맞물려 예전엔 200번을 돌아도 두 값 사이를 오가던 자료 (로그 비용, 모델 m0~m5)
+    OSC: ClassVar[dict[str, dict[str, float]]] = {
+        "LiveBench": {"m0": -2.94, "m1": -3.94, "m2": -4.34, "m4": -2.6},
+        "Artificial Analysis": {"m0": -3.04, "m1": -4.04, "m2": -4.44, "m3": -2.48, "m4": -2.7},
+        "DeepSWE": {"m0": -4.41, "m2": -4.49, "m3": -2.28, "m4": -2.6, "m5": -4.58},
+        "CursorBench": {"m1": -3.57, "m2": -3.48, "m3": -2.81, "m4": -2.77, "m5": -4.44},
+    }
+
+    def _src(self, names):
+        return {s: {(k, "high"): math.exp(v) for k, v in self.OSC[s].items()} for s in names}
+
+    def _worst_mismatch(self, info, names):
+        """맞춘 비율이 정말 '고정점'인지: 각 출처 비율 = 다른 출처와의 차이의 가운데값 이어야 함 → 가장 큰 어긋남"""
+        off = {s: math.log(v["factor"]) for s, v in info.items()}
+        worst = 0.0
+        for s in names:
+            if info[s].get("ref"):
+                continue
+            diffs = []
+            for k, v in self.OSC[s].items():
+                others = [self.OSC[s2][k] + off[s2] for s2 in names if s2 != s and k in self.OSC[s2]]
+                if others:
+                    diffs.append(sum(others) / len(others) - v)
+            worst = max(worst, abs(statistics.median(diffs) - off[s]))
+        return worst
+
+    def test_combine_converges_even_without_reference(self):
+        # 기준(LiveBench)이 있는 날 → 비율 기록, 기준이 빠진 날 → 기록한 비율로 이어서 맞춤. 두 경우 모두 끝까지 맞춰져야 함
+        with mock.patch("builtins.print") as pr:
+            _, full = combine.combine_costs(self._src(self.OSC))
+            anchor = {s: v["factor"] for s, v in full.items()}
+            rest = [s for s in self.OSC if s != "LiveBench"]
+            _, info = combine.combine_costs(self._src(rest), anchor=anchor)
+        pr.assert_not_called()             # '덜 맞춰짐' 안내가 나오지 않아야 함
+        for got, names in ((full, list(self.OSC)), (info, rest)):
+            self.assertTrue(all(v.get("converged", True) for v in got.values()))
+            self.assertLess(self._worst_mismatch(got, names), 1e-3)   # 예전 방식은 0.03 넘게 어긋난 채 멈춤
+        self.assertAlmostEqual(info["Artificial Analysis"]["factor"], full["Artificial Analysis"]["factor"], delta=1e-4)
+
+    def test_combine_reports_when_not_converged(self):
+        # 반복 횟수를 다 써도 못 맞추면 멈추지 않고 마지막 값을 쓰되, 기록(converged: False)과 안내를 남김
+        with mock.patch.object(combine, "MAX_ITER", 1), mock.patch("builtins.print") as pr:
+            _, info = combine.combine_costs(self._src(self.OSC))
+        pr.assert_called()
+        self.assertIs(info["DeepSWE"]["converged"], False)
+        self.assertNotIn("converged", info["LiveBench"])          # 기준 출처는 맞출 것이 없음
+
+    def _ladder_world(self, n_link=0, ratio=20.0):
+        """명시 등급(추론 끔·중간·높음)을 잰 모델 10개 + '기본'·'추론 켬'을 잰 모델 10개 (두 묶음은 따로)
+        + '추론 끔'과 '추론 켬'을 함께 잰 '잇는 모델' n_link 개 (추론 켬 = 추론 끔 × ratio)"""
+        m = {}
+        for i in range(10):
+            c = 0.01 * (i + 1)
+            m[(f"e{i}", "none")] = (math.log(c * (0.15 + 0.01 * i)), ["X"])
+            m[(f"e{i}", "medium")] = (math.log(c * 0.6), ["X"])
+            m[(f"e{i}", "high")] = (math.log(c), ["X"])
+            m[(f"a{i}", "default")] = (math.log(c), ["X"])
+            m[(f"a{i}", "thinking")] = (math.log(c * (1.2 + 0.07 * i)), ["X"])
+        for j in range(n_link):
+            m[(f"link{j}", "none")] = (math.log(0.01), ["X"])
+            m[(f"link{j}", "thinking")] = (math.log(0.01 * ratio), ["X"])
+        return m
+
+    def test_ladder_one_linking_model_does_not_move_levels(self):
+        # 예전: 잇는 모델 하나가 '기본'·'추론 켬' 묶음의 높이를 통째로 정해 배율이 0.26~10배로 흔들렸음
+        base, _ = combine.effort_ladder(self._ladder_world())
+        for ratio in (2.0, 20.0, 80.0):
+            lad, _ = combine.effort_ladder(self._ladder_world(n_link=1, ratio=ratio))
+            for e in ("none", "default", "thinking", "high"):
+                with self.subTest(ratio=ratio, e=e):
+                    self.assertAlmostEqual(lad[e], base[e], delta=0.01)
+        # 잇는 모델이 충분하면(3개 이상) 두 묶음을 이어 자료대로 높이를 정함: 추론 켬 ≈ 추론 끔 × 20
+        lad, _ = combine.effort_ladder(self._ladder_world(n_link=3, ratio=20.0))
+        self.assertAlmostEqual(math.exp(lad["thinking"] - lad["none"]), 20.0, delta=2.0)
+        self.assertAlmostEqual(lad["high"], 0.0)
+        self.assertLessEqual(lad["none"], lad["medium"])
+        self.assertLessEqual(lad["medium"], lad["high"])
+
+    def test_components_need_enough_links(self):
+        # 함께 잰 모델이 3개 이상인 등급끼리만 한 묶음 ('추론 끔'+'추론 켬' 모델 하나로는 잇지 않음)
+        by_base = {"link": {"none": 0, "thinking": 0}}
+        for i in range(3):
+            by_base[f"e{i}"] = {"none": 0, "high": 0}
+            by_base[f"a{i}"] = {"default": 0, "thinking": 0}
+        efforts = ["none", "high", "default", "thinking"]
+        self.assertEqual(sorted(map(sorted, combine._components(by_base, efforts))), [["default", "thinking"], ["high", "none"]])
+        self.assertEqual(len(combine._components(by_base, efforts, min_links=1)), 1)
 
     def test_fill_costs_kinds(self):
         merged = {("m", "high"): (math.log(1.0), ["LiveBench"])}

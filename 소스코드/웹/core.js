@@ -204,6 +204,11 @@
     if (p < 10) return "$" + +p.toFixed(2);
     return "$" + Math.round(p);
   }
+  /** 가격표 원래 값 그대로 (자세히 보기용 — 반올림하지 않고 끝의 0 만 뺌: 13.5 → $13.5, 0.2574 → $0.2574) @param {unknown} p */
+  function fmtPriceExact(p) {
+    if (typeof p !== "number" || !Number.isFinite(p) || p < 0) return "—";
+    return "$" + String(+p.toPrecision(6));
+  }
 
   /** 'YYYY-MM-DD HH:MM' (한국 시간) → 밀리초, 해석 못 하면 NaN
    * @param {unknown} s */
@@ -289,11 +294,12 @@
 
   /** 검색창 글 → 검색어 목록 (글자·숫자가 하나도 없는 검색어는 버림)
    *  · 한글 별칭에서 바뀐 단어는 앞에 '=' 를 붙여 '단어 전체'로만 맞춤 (솔 → sol 이 Solar 에 맞지 않게)
+   *  · 별칭 바로 뒤에 숫자·영문이 붙으면 영어로 붙여 쓴 것과 똑같이 (지피티5 = gpt5, 지피티-5 = gpt-5 → GPT-4.5 는 안 나옴)
    * @param {unknown} q */
   function searchTerms(q) {
     return String(q == null ? "" : q).split(/[,，、;]/).map((t) => {
       let r = t.trim().toLowerCase();
-      for (const [ko, en] of KO_ALIAS) r = r.split(ko).join(" =" + en + " ");
+      for (const [ko, en] of KO_ALIAS) r = r.replace(new RegExp(ko + "(?=[-_.]?[0-9a-z])", "g"), " " + en).split(ko).join(" =" + en + " ");
       return r.replace(/\s+/g, " ").trim();
     }).filter((t) => /[a-z0-9가-힣]/.test(t));
   }
@@ -570,7 +576,7 @@
   }
 
   return {
-    EFFORT_ORDER, DIFFICULTY, DataError, num, validDate, normalizeData, uniqueNames, scoreVariant, accuracy, fmtAcc, fmtCost, fmtPrice,
+    EFFORT_ORDER, DIFFICULTY, DataError, num, validDate, normalizeData, uniqueNames, scoreVariant, accuracy, fmtAcc, fmtCost, fmtPrice, fmtPriceExact,
     parseKST, ago, localDate, monthsAgo, daysSince, mixHex, esc, confOf, savePct, searchTerms, makeHay, matchSearch,
     frontier, picks, valueScaler, clampView, logTicks, sortEfforts, effLabel, canSelect, defaultEffort, howToSet, pickCompanies,
   };

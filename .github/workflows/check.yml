@@ -20,13 +20,14 @@ jobs:
       PYTHONIOENCODING: utf-8
       PYTHONDONTWRITEBYTECODE: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
+          package-manager-cache: false   # 검사 도구는 검사.py 가 따로 설치 (자동 캐시 안 씀)
       - name: 아이콘 시험용 Pillow
         run: python -m pip install -q pillow
       - name: 전체 검사

@@ -12,10 +12,10 @@ const CODE = fs.readFileSync(path.join(HERE, "..", "웹", "sw.js"), "utf8");
 const ORIGIN = "https://archiwjy.github.io";
 const SCOPE = ORIGIN + "/ai-model-compare/ai-x/";
 
-function makeWorld({ online = true, status = 200, oldCaches = [] } = {}) {
+function makeWorld({ online = true, status = 200, oldCaches = [], waitMs = null } = {}) {
   const stores = new Map(oldCaches.map((n) => [n, new Map()]));
   const handlers = {};
-  const net = { online, status, calls: [] };
+  const net = { online, status, calls: [], delay: 0, ver: "" };   // delay: 응답 지연(ms) · ver: 서버에 올라간 판
   const caches = {
     async open(name) {
       if (!stores.has(name)) stores.set(name, new Map());
@@ -45,13 +45,16 @@ function makeWorld({ online = true, status = 200, oldCaches = [] } = {}) {
   };
   const fetchFn = async (req) => {
     net.calls.push(typeof req === "string" ? req : req.url);
+    const ver = net.ver;
+    if (net.delay) await new Promise((res) => { setTimeout(res, net.delay); });
     if (!net.online) throw new TypeError("Failed to fetch");
-    const r = new Response("본문:" + (req.url || req), { status: net.status });
+    const r = new Response("본문:" + (req.url || req) + ver, { status: net.status });
     Object.defineProperty(r, "type", { value: "basic" });
     return r;
   };
   const ctx = vm.createContext({ self, caches, fetch: fetchFn, Response, URL, Request, Promise, console, setTimeout, clearTimeout });
-  vm.runInContext(CODE, ctx, { filename: "sw.js" });
+  // 시험에서는 '느림' 기준을 짧게 (3.5초를 실제로 기다리지 않게)
+  vm.runInContext(waitMs == null ? CODE : CODE.replace("const WAIT_MS = 3500;", `const WAIT_MS = ${waitMs};`), ctx, { filename: "sw.js" });
   async function fire(url, { method = "GET", mode = "no-cors" } = {}) {
     const waits = [];
     let responded = null;
@@ -144,6 +147,56 @@ test("다른 사이트 · POST 요청은 건드리지 않음", async () => {
 test("새 버전이 켜지면 예전 저장소는 지움 (같은 주소의 다른 앱 저장소는 그대로)", async () => {
   const w = makeWorld({ oldCaches: ["ai-compare-v1", "다른앱"] });
   await w.activate();
-  assert.equal([...w.stores.keys()].filter((k) => k.startsWith("ai-compare")).length, 0);
+  assert.deepEqual([...w.stores.keys()].filter((k) => k.startsWith("ai-compare")), ["ai-compare-v2"]);   // 지금 저장소 하나만
   assert.ok(w.stores.has("다른앱"));
+});
+
+const sleep = (ms) => new Promise((res) => { setTimeout(res, ms); });
+
+test("느리지만 인터넷이 되면 지문 파일은 새 판을 끝까지 기다림 (옛 판으로 바꾸면 화면 파일끼리 판이 섞임)", async () => {
+  const w = makeWorld({ waitMs: 30 });
+  await w.fire(`${SCOPE}core.js?v=OLD`);
+  w.net.delay = 120;
+  const r = await w.fire(`${SCOPE}core.js?v=NEW`);
+  assert.equal(await r.text(), `본문:${SCOPE}core.js?v=NEW`);
+});
+
+test("첫 화면이 느려 옛 화면을 보여 줬으면, 늦게 온 새 첫 화면은 저장하지 않음 (다음에 끊겨도 화면과 파일의 판이 맞음)", async () => {
+  const w = makeWorld({ waitMs: 30 });
+  w.net.ver = "#1";
+  await w.fire(SCOPE, { mode: "navigate" });
+  w.net.ver = "#2";
+  w.net.delay = 120;
+  const shown = await w.fire(SCOPE, { mode: "navigate" });
+  assert.equal(await shown.text(), `본문:${SCOPE}#1`);          // 느려서 저장본(옛 화면)
+  await sleep(200);                                             // 늦게 온 새 화면이 도착할 때까지
+  w.net.online = false;
+  w.net.delay = 0;
+  const off = await w.fire(SCOPE, { mode: "navigate" });
+  assert.equal(await off.text(), `본문:${SCOPE}#1`);            // 저장된 것은 여전히 보여 줬던 옛 화면
+});
+
+test("빠르게 온 새 첫 화면은 저장 (다음에 끊겨도 새 화면)", async () => {
+  const w = makeWorld({ waitMs: 200 });
+  w.net.ver = "#1";
+  await w.fire(SCOPE, { mode: "navigate" });
+  w.net.ver = "#2";
+  await w.fire(SCOPE, { mode: "navigate" });
+  w.net.online = false;
+  assert.equal(await (await w.fire(SCOPE, { mode: "navigate" })).text(), `본문:${SCOPE}#2`);
+});
+
+test("새 도우미로 바뀐 직후 인터넷이 끊겨도 첫 화면이 열림 (예전 저장소의 파일을 옮겨 담음)", async () => {
+  const w = makeWorld({ oldCaches: ["ai-compare-v1"] });
+  const v1 = w.stores.get("ai-compare-v1");
+  v1.set(SCOPE, new Response("예전 첫 화면 (오래됨)"));
+  v1.set(`${SCOPE}app.js?v=A`, new Response("app A"));
+  v1.delete(SCOPE);
+  v1.set(SCOPE, new Response("예전 첫 화면"));                    // 같은 파일은 가장 최근 것만
+  await w.activate();
+  assert.ok(!w.stores.has("ai-compare-v1"));
+  w.net.online = false;
+  const r = await w.fire(SCOPE, { mode: "navigate" });
+  assert.equal(await r.text(), "예전 첫 화면");
+  assert.equal(await (await w.fire(`${SCOPE}app.js?v=A`)).text(), "app A");
 });

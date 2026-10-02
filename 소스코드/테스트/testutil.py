@@ -14,9 +14,10 @@ if SRC not in sys.path:
 
 TMP = tempfile.mkdtemp(prefix="ai_compare_test_")
 os.environ["CACHE_DIR"] = os.path.join(TMP, "cache")
-os.environ.pop("AA_API_KEY", None)
-os.environ.pop("SITE_BASE_URL", None)
-os.environ.pop("CACHE_MIN_AGE_HOURS", None)
+# 결과에 영향을 주는 환경 변수는 모두 지움 → 이 컴퓨터·GitHub 설정과 상관없이 같은 결과
+for _name in ("AA_API_KEY", "SITE_SECRET", "SITE_BASE_URL", "CACHE_MIN_AGE_HOURS", "LAST_GOOD_PATH", "AI_COMPARE_REPO",
+              "COLLECT_OUTCOME", "BUILD_OUTCOME", "DEPLOY_RESULT", "JOB_FAILED", "GITHUB_REPOSITORY", "GH_TOKEN"):
+    os.environ.pop(_name, None)
 
 WEB = os.path.join(SRC, "웹")
 REAL_DATA = os.path.join(WEB, "data.json")

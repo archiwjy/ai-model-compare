@@ -157,6 +157,31 @@ test("검색: 단어 안의 글자에는 맞지 않음 (미니 → Gemini 아님
   assert.ok(!C.matchSearch(hay("HyperNova 60B", "hypernova-60b"), C.searchTerms("노바")));
 });
 
+test("검색: 한글 별칭에 숫자를 붙여 써도 영어로 친 것과 결과가 같음 (지피티5 = gpt5)", () => {
+  const models = [
+    hay("GPT-4.5", "gpt-4-5", "OpenAI"), hay("GPT-5", "gpt-5", "OpenAI"), hay("GPT-5.1", "gpt-5-1", "OpenAI"), hay("GPT-5 mini", "gpt-5-mini", "OpenAI"),
+    hay("Qwen2.5 Coder 32B", "qwen2-5-coder-32b", "Alibaba"), hay("Qwen3 Max", "qwen3-max", "Alibaba"), hay("Gemini 1.5 (002)", "gemini-1-5-002", "Google"),
+    hay("Gemini 2.5 Pro", "gemini-2-5-pro", "Google"), hay("Claude Opus 5.5", "claude-opus-5-5", "Anthropic"),
+  ];
+  const hits = (q) => models.map((h) => C.matchSearch(h, C.searchTerms(q)));
+  for (const [ko, en] of [["지피티5", "gpt5"], ["지피티-5", "gpt-5"], ["큐웬3", "qwen3"], ["제미나이2", "gemini2"], ["오퍼스5", "opus5"], ["클로드opus", "claudeopus"]]) {
+    assert.deepEqual(hits(ko), hits(en), `${ko} ↔ ${en}`);
+  }
+  assert.ok(!C.matchSearch(models[0], C.searchTerms("지피티5")));      // GPT-4.5 는 지피티5 에 안 나옴
+  assert.ok(C.matchSearch(models[1], C.searchTerms("지피티5")));
+  assert.ok(!C.matchSearch(models[4], C.searchTerms("큐웬3")));        // Qwen2.5 는 큐웬3 에 안 나옴
+});
+
+test("가격표 원래 값 그대로 (자세히 보기·말풍선용, 반올림 없음)", () => {
+  assert.equal(C.fmtPriceExact(13.5), "$13.5");
+  assert.equal(C.fmtPriceExact(0.2574), "$0.2574");
+  assert.equal(C.fmtPriceExact(0.435), "$0.435");
+  assert.equal(C.fmtPriceExact(15), "$15");
+  assert.equal(C.fmtPriceExact(0), "$0");
+  for (const bad of [null, undefined, -1, NaN, Infinity, "3"]) assert.equal(C.fmtPriceExact(bad), "—");
+  assert.equal(C.fmtPrice(13.5), "$14");      // 좁은 표에서는 짧게 (그대로)
+});
+
 test("검색: 기호만 친 검색어는 무시", () => {
   for (const q of ["-", ".", "_", "·", " , ", "---"]) assert.deepEqual(C.searchTerms(q), [], q);
   assert.deepEqual(C.searchTerms("<script>"), ["<script>"]);
