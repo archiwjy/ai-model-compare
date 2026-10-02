@@ -1,5 +1,9 @@
 # GitHub 자동 실행 설정 (저장소의 .github/workflows/update.yml 로 복사됨)
-# 6시간마다: 4곳에서 최신 점수를 받아 계산 → 사이트 갱신
+# 6시간마다: 기관에서 최신 점수를 받아 계산 → 사이트 갱신
+#
+# 비밀 주소 지키기 (공개 저장소라 실행 기록을 누구나 볼 수 있음)
+#  · 비밀 폴더 이름은 실행 기록에 *** 로 가려짐 (맨 처음 단계에서 가림 등록)
+#  · 사이트 묶음은 파일 목록을 출력하지 않고 만들고, 배포가 끝나면 바로 지움 (다운로드로 주소가 새지 않게)
 name: 데이터 갱신 및 사이트 올리기
 
 on:
@@ -14,6 +18,7 @@ permissions:
   pages: write
   id-token: write
   issues: write
+  actions: write                # 배포가 끝난 사이트 묶음 지우기
 
 concurrency:
   group: pages
@@ -22,18 +27,28 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      checked: ${{ steps.check.outputs.checked }}     # 자동 점검까지 돌았는지 (notify 가 같은 알림을 덮어쓰지 않게)
     env:
       TZ: Asia/Seoul
       PYTHONIOENCODING: utf-8
       PYTHONDONTWRITEBYTECODE: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: 비밀 폴더 이름 가리기
+        env:
+          AA_API_KEY: ${{ secrets.AA_API_KEY }}
+          SITE_SECRET: ${{ secrets.SITE_SECRET }}
+        run: |
+          python3 -c "import os,hashlib; k=(os.environ.get('SITE_SECRET') or os.environ.get('AA_API_KEY') or '').strip(); k and print('::add-mask::ai-'+hashlib.sha256(('site:'+k).encode()).hexdigest()[:20])"
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      # 받아 둔 원본을 다음 실행에서도 쓰도록 보관 (코드만 고쳐 올릴 때 기관에 다시 요청하지 않게 → 429 오류 방지)
+      # 받아 둔 원본·마지막 정상 데이터·수집 상태를 다음 실행에서도 쓰도록 보관
+      # (코드만 고쳐 올릴 때 기관에 다시 요청하지 않게 → 429 오류 방지, 공개 저장소에 데이터를 올리지 않아도 됨)
       - name: 받아 둔 원본 꺼내기
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/cache
           key: raw-${{ github.run_id }}
@@ -42,24 +57,38 @@ jobs:
         id: collect
         env:
           AA_API_KEY: ${{ secrets.AA_API_KEY }}
+          SITE_SECRET: ${{ secrets.SITE_SECRET }}
           CACHE_DIR: ${{ runner.temp }}/cache
           CACHE_MIN_AGE_HOURS: "5"
           SITE_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: python 소스코드/collect.py
       - name: 사이트 파일 묶기
+        id: build
         env:
           AA_API_KEY: ${{ secrets.AA_API_KEY }}
+          SITE_SECRET: ${{ secrets.SITE_SECRET }}
+          SITE_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: python 소스코드/build_site.py _site
-      # 손봐야 할 일이 생기면 GitHub 이슈(알림 메일)를 열고, 해결되면 스스로 닫음
+      # 정보용 알림 — 이 단계가 실패해도 사이트 올리기는 막지 않음
       - name: 자동 점검
+        id: check
         if: always()
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           COLLECT_OUTCOME: ${{ steps.collect.outcome }}
-        run: python 소스코드/auto_check.py
-      - uses: actions/upload-pages-artifact@v3
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: python 소스코드/auto_check.py && echo "checked=true" >> "$GITHUB_OUTPUT"
+      # 사이트 묶음 (파일 목록을 출력하지 않음 — 공개 기록에 비밀 폴더 이름이 남지 않게)
+      - name: 사이트 묶음 만들기
+        run: tar --dereference --hard-dereference --directory _site -cf "$RUNNER_TEMP/artifact.tar" --exclude=.git --exclude=.github .
+      - name: 사이트 묶음 올리기
+        uses: actions/upload-artifact@v7
         with:
-          path: _site
+          name: github-pages
+          path: ${{ runner.temp }}/artifact.tar
+          retention-days: 1
+          if-no-files-found: error
 
   deploy:
     needs: build
@@ -69,14 +98,43 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
+      # 배포가 끝난 묶음은 바로 지움 (공개 저장소에선 로그인한 누구나 내려받을 수 있어서)
+      # 배포가 실패하면 남겨 둠 → 'Re-run failed jobs' 로 배포만 다시 할 수 있게 (하루 뒤 자동으로 사라짐)
+      - name: 사이트 묶음 지우기
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for id in $(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" --jq '.artifacts[] | select(.name=="github-pages") | .id'); do
+            gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" && echo "사이트 묶음을 지웠어요"
+          done
 
-  # GitHub 는 60일 동안 저장소에 변화가 없으면 예약 실행을 멈춘다 → 45일마다 빈 기록을 남겨 계속 돌게 함
+  # 올리기가 실패했거나, 만들기 작업이 자동 점검 전에 멈췄을 때만 알림 (사이트는 직전 상태 그대로)
+  # (계산·묶기 실패는 만들기 작업 안의 자동 점검이 이미 알림 → 여기서 덮어쓰지 않음)
+  notify:
+    needs: [build, deploy]
+    if: failure() && (needs.deploy.result == 'failure' || needs.build.outputs.checked != 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: 실패 알림
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONIOENCODING: utf-8
+          DEPLOY_RESULT: ${{ needs.deploy.result == 'failure' && 'failure' || '' }}
+          JOB_FAILED: ${{ needs.build.result == 'failure' && needs.build.outputs.checked != 'true' && 'build' || '' }}
+        run: python 소스코드/auto_check.py --덧붙이기
+
+  # GitHub 은 60일 동안 저장소에 변화가 없으면 예약 실행을 멈춤 → 45일마다 빈 기록을 남겨 계속 돌게 함
   keepalive:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: 예약 실행 유지
         run: |
           last=$(git log -1 --format=%ct)
