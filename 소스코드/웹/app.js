@@ -63,11 +63,11 @@
 
   // ───────── 설정 (저장하지 않음 — 열 때마다 기본값)
   //  기본값 (사용자가 정함, 2026-09-30): 맞힌 문제당 · 전체 기간 · 매우 어려움 · 회사마다 3개 ·
-  //  가성비 경계선·모델 이름 켬 · 추정 비용 끔 · 상위 5개 회사만 (기타 숨김) · 어두운 화면 · 순위표는 성능 높은 순
+  //  가성비 경계선·모델 이름 켬 · 추정 비용 끔 · 상위 5개 회사만 (기타 숨김) · 흰 화면(v6부터) · 순위표는 성능 높은 순
   const DEFAULTS = {
     x: "costok", period: 0, perCo: 3, difficulty: "vhard", search: "", hidden: ["기타"], frontier: true, labels: true,
     estimated: false, selectableOnly: true, bestOnly: false, sortK: "score", sortDir: -1, selected: null, selEffort: null,
-    theme: "dark", pinned: [], pinnedOnly: false,
+    theme: "light", pinned: [], pinnedOnly: false,
   };
   // 들어올 때·새로고침할 때마다 항상 위 기본값으로 시작 (사용자 요청 2026-09-30)
   //  · 화면에서 바꾼 설정은 그 창을 보는 동안만 유지되고 저장하지 않음
@@ -80,8 +80,8 @@
   }
   if (!PER_CO_OPTIONS.includes(S.perCo)) S.perCo = 3;
   for (const k of ["top", "budget", "weight", "enabled"]) delete S[k];   // 예전 버전 설정은 버림
-  document.documentElement.dataset.theme = S.theme || "dark";
-  document.querySelector('meta[name="theme-color"]').content = S.theme === "light" ? "#f4f3ee" : "#0a0b0d";
+  document.documentElement.dataset.theme = S.theme || "light";
+  document.querySelector('meta[name="theme-color"]').content = S.theme === "light" ? "#ffffff" : "#0b0b0b";
 
   // ───────── 도우미
   const $ = (sel) => document.querySelector(sel);
@@ -385,7 +385,7 @@
   const chart = echarts.init(chartEl, null, { renderer: "canvas" });
   const isNarrow = () => chartEl.clientWidth < 560;
   // 지도 배치 (첫 화면 전체가 지도): 가로 1024 이상 · 세로 620 이상 — style.css 와 같은 기준
-  const MAPMODE = () => matchMedia("(min-width: 1024px) and (min-height: 620px)").matches;
+  const MAPMODE = () => false;   // v5 의 지도 전체 화면 배치 (v6 에서는 쓰지 않음)
   let renderedNarrow = null, resizeTimer = null, VIEW = null;
   let FR = { front: [], status: new Map(), k: 0, levelAt: () => -Infinity };
   let hoverCo = null;   // 위 회사 버튼에 마우스를 올린 회사 → 그래프에서 그 회사만 강조
@@ -421,8 +421,9 @@
     renderSearchNote(SR);
     renderLegend(all, found);
     renderPinBar();
+    renderCards(points, SR);   // 오늘의 답(PICKS)을 먼저 정함 → 지도의 각주 핀 · 큰 문장에 씀
     renderChart(list, points);
-    renderCards(points, SR);
+    renderHeadline();
     placeCallouts();
     renderMinimap(points);
     renderTable(list);
@@ -470,6 +471,57 @@
         save(); render();
       };
     });
+  }
+
+  // ───────── 오늘의 답: 큰 문장 하나 + 각주 (데이터가 바뀌면 문장도 자동으로 바뀜)
+  //  1) 가장 똑똑한 점  2) 사실상 같은 실력 중 가장 싼 점(가성비 추천 1위)  3) 더 아끼는 선택(가성비 추천 3위)
+  let PICKS = null;
+  function pinTargets() {
+    const P = PICKS, out = [];
+    if (!P) return out;
+    [[1, P.top], [2, P.value], [3, P.alt]].forEach(([n, v]) => {
+      if (!v || xOf(v) == null) return;
+      const same = out.find((t) => t.v === v);
+      if (same) same.n.push(n); else out.push({ n: [n], v });
+    });
+    return out;
+  }
+  function renderHeadline() {
+    const el = $("#headline"), notes = $("#notes");
+    if (!el) return;
+    const P = PICKS;
+    if (!P) { el.textContent = "돈을 쓴 만큼 똑똑한 AI는 무엇일까"; if (notes) notes.innerHTML = ""; return; }
+    const sup = (n) => `<sup>${n})</sup>`;
+    const nm = (v) => `<span class="nm">${esc(v.m.name)}</span><span class="ef">${esc(v.eff)}</span>`;
+    const ef = (v) => `<span class="nm">${esc(v.eff)}</span>`;
+    const save = (v) => { const a = costFor(v), b = costFor(P.top); return a && b ? Math.min(99, Math.round((1 - a / b) * 100)) : 0; };
+    let h = `지금 가장 똑똑한 AI는 ${nm(P.top)}${sup(1)}.`;
+    if (P.value && P.value !== P.top) {
+      const s1 = save(P.value);
+      h += ` 사실상 같은 실력을 ${s1 > 0 ? `<em>${s1}% 싸게</em>` : "비슷한 값에"} 쓰려면 ${P.value.m === P.top.m ? "같은 모델의 " + ef(P.value) : nm(P.value)}${sup(2)}`;
+    } else if (P.value) {
+      h += ` 가성비로 봐도 이 점이 가장 좋아요${sup(2)}`;
+    }
+    if (P.alt && P.alt !== P.value) {
+      const base = P.value || P.top;
+      h += `${P.value ? "," : "."} 더 아끼려면 ${P.alt.m === base.m ? ef(P.alt) : nm(P.alt)}${sup(3)}.`;
+    } else if (P.value) h += ".";
+    el.innerHTML = h;
+    if (notes) {
+      const row = (n, v) => `<li><b>${n})</b><span>${esc(v.m.name)} · ${esc(v.eff)}</span> — 종합 ${v.score.toFixed(1)}점 · ${esc(costUnit())} ${fmtCost(costFor(v))}</li>`;
+      notes.innerHTML = [[1, P.top], [2, P.value], [3, P.alt]].filter(([n, v]) => v && (n === 1 || v !== P.top) && !(n === 3 && v === P.value)).map(([n, v]) => row(n, v)).join("");
+    }
+  }
+  // 확대·이동할 때 핀을 점에 맞춰 옮김
+  function updatePins() {
+    const V = VIEWBOX || FULL;
+    if (!V) return;
+    const els = pinTargets().map((t, i) => {
+      const x = xOf(t.v), inV = x >= V.x0 && x <= V.x1 && t.v.score >= V.y0 && t.v.score <= V.y1;
+      const q = inV ? chart.convertToPixel({ gridIndex: 0 }, [x, t.v.score]) : null;
+      return { id: "pin" + i, x: q ? q[0] : -999, y: q ? q[1] : -999, invisible: !q };
+    });
+    if (els.length) chart.setOption({ graphic: els }, { silent: true });
   }
 
   // ───────── 첫 화면 미니 지도: 지금 보이는 점과 가성비 경계선을 작게 (필터를 바꾸면 같이 바뀜)
@@ -598,7 +650,7 @@
     // 경계선 색 = 신호색(연두). 이 색은 경계선·가성비에만 쓴다
     const txt = css("--text"), txt2 = css("--text-2"), muted = css("--muted"), grid = css("--grid"), axis = css("--axis"), ink = css("--acc");
     const font = "Pretendard Variable, Pretendard, Malgun Gothic, sans-serif";
-    const mono = "JetBrains Mono, Pretendard Variable, Pretendard, Consolas, monospace";   // 눈금 숫자는 계기판처럼 고정폭
+    const mono = font;   // v6: 글꼴은 하나 (눈금 숫자도 같은 글꼴)
     const narrow = isNarrow();
     const mapMode = MAPMODE(), full = chartBox.classList.contains("full");
     const surf = mapMode ? css("--bg") : css("--surface");   // 점 테두리·글자 테두리 = 바탕색 (지도 배치는 바탕이 곧 페이지)
@@ -696,7 +748,7 @@
           symbolSize: base + (pinned ? 3 : 0) + (fr ? 3 : nr ? 2 : 0),
           itemStyle: Object.assign(
             hollow ? { color: surf, borderColor: col, borderWidth: 2 }
-              : fr ? { color: col, borderColor: ink, borderWidth: 2 }   // 경계선 위 점: 회사 색 + 연두 테두리
+              : fr ? { color: col, borderColor: ink, borderWidth: 1.6 }   // 경계선 위 점: 회사 색 + 파란 테두리
               : nr ? { color: col, borderColor: ink, borderWidth: 1.4, borderType: [2, 2] }
               : { color: col, borderColor: surf, borderWidth: 1.5 },
             { opacity: dim ? 0.14 : 1 }),
@@ -782,6 +834,17 @@
       const hr = headEl.getBoundingClientRect(), cr = chartEl.getBoundingClientRect();
       regionRects.push({ x: hr.left - cr.left - 6, y: hr.top - cr.top - 6, w: hr.width + 12, h: hr.height + 12 });
     }
+    // 각주 핀: 큰 문장의 1) 2) 3) 이 가리키는 점에 파란 핀 (이름표가 핀을 가리지 않게 그 자리를 비워 둠)
+    pinTargets().forEach((t, i) => {
+      const x = xOf(t.v), inV = x >= V.x0 && x <= V.x1 && t.v.score >= V.y0 && t.v.score <= V.y1;
+      const X = inV ? gx(x) : -999, Y = inV ? gy(t.v.score) : -999, label = t.n.map((n) => n + ")").join(" ");
+      if (inV) regionRects.push({ x: X - 8, y: Y - 40, w: 14 + label.length * 7, h: 34 });
+      regions.push({ id: "pin" + i, type: "group", x: X, y: Y, silent: true, z: 30, invisible: !inV, children: [
+        { type: "line", shape: { x1: 0, y1: -7, x2: 0, y2: -27 }, style: { stroke: ink, lineWidth: 1.5 } },
+        { type: "circle", shape: { cx: 0, cy: -32, r: 6 }, style: { fill: ink } },
+        { type: "text", x: 10, y: -40, style: { text: label, fill: ink, font: `700 11px ${font}` } },
+      ] });
+    });
     LAST = { lines: lineRects, blocks: regionRects.slice(), G };
     placeLabels(series, V, narrow, { txt, txt2, halo, font, block: regionRects, soft: lineRects, G });
     // 가성비 경계선: 연두색 실선 + 빛, 아래에 '오차 범위' 띠 — 이 화면의 주인공
@@ -789,19 +852,26 @@
       const pts = front.map((p) => [p.x, +p.v.score.toFixed(2)]);
       pts.push([V.x1 * 1.5, pts[pts.length - 1][1]]);   // 가장 비싼 경계 점 오른쪽으로도 수평 연장
       const k = FR.k;
+      // 오차 범위 띠: 경계선(계단)과 그보다 k점 낮은 계단 사이를 옅은 파랑으로 칠함 (포스터의 파란 띠처럼)
+      //  · 직접 다각형으로 그려 확대·이동해도 그대로 따라감
+      const bandFill = css("--acc-fill");
       series.push({
-        id: "__fband_lo", type: "line", step: "end", silent: true, z: 1, stack: "fband", symbol: "none",
-        data: pts.map(([x, y]) => [x, y - k]), lineStyle: { opacity: 0 }, tooltip: { show: false }, emphasis: { disabled: true }, animation: false,
-      });
-      series.push({
-        id: "__fband", type: "line", step: "end", silent: true, z: 1, stack: "fband", symbol: "none",
-        data: pts.map(([x]) => [x, k]), lineStyle: { opacity: 0 }, areaStyle: { color: ink, opacity: 0.06 },
-        tooltip: { show: false }, emphasis: { disabled: true }, animation: false,
+        id: "__fband", type: "custom", silent: true, z: 1, clip: true, data: [0], tooltip: { show: false }, animation: false,
+        renderItem: (params, api) => {
+          const up = [];
+          for (let i = 0; i < pts.length; i++) {
+            if (i > 0) up.push([pts[i][0], pts[i - 1][1]]);
+            up.push(pts[i]);
+          }
+          const top = up.map((q) => api.coord(q));
+          const bot = up.slice().reverse().map(([x, y]) => api.coord([x, y - k]));
+          return { type: "polygon", shape: { points: top.concat(bot) }, style: { fill: bandFill, opacity: 0.9 } };
+        },
       });
       series.push({
         id: "__frontier", name: "가성비 경계선", type: "line", step: "end", silent: true, z: 2,
         data: pts, showSymbol: false,
-        lineStyle: { width: 2, color: ink, opacity: 0.95, shadowBlur: 14, shadowColor: ink + "80", cap: "round", join: "round" },
+        lineStyle: { width: 2.5, color: ink, opacity: 1, cap: "butt", join: "miter" },
         tooltip: { show: false }, emphasis: { disabled: true },
         animationDuration: firstDraw ? 1900 : 1100, animationDelay: firstDraw ? 250 : 0, animationEasing: "cubicInOut",
       });
@@ -812,7 +882,7 @@
         series.push({
           id: "__fpulse", type: "lines", coordinateSystem: "cartesian2d", polyline: true, silent: true, z: 4, clip: true,
           data: [{ coords: cs }], lineStyle: { opacity: 0, width: 0 },
-          effect: { show: true, period: 7, trailLength: 0.2, symbol: "circle", symbolSize: narrow ? 3 : 4, color: txt, loop: true },
+          effect: { show: true, period: 9, trailLength: 0, symbol: "circle", symbolSize: narrow ? 4 : 5, color: ink, loop: true },
           tooltip: { show: false }, animation: false,
         });
       }
@@ -966,6 +1036,7 @@
     const opt = { yAxis: { min: V.y0, max: V.y1 } };
     opt.xAxis = S.x === "date" ? dateAxisView(V, css("--muted")) : logAxisView(V, css("--muted"));
     chart.setOption(opt, { silent: true });
+    updatePins();
     updateZoomUi();
     clearTimeout(labelTimer);   // 멈추면 이름표 방향 다시 계산
     labelTimer = setTimeout(() => { if (VIEW) { quietRender = true; renderChart(VIEW.list, VIEW.points); quietRender = false; } }, 350);
@@ -1341,6 +1412,7 @@
     // 그래프와 같은 기준: 가격표로 짐작한 비용은 빼고 (추정 비용 그리기를 켜면 포함), 등급 환산은 포함하되 확실성 표시에서 알려 줌
     const withCost = points.filter((p) => costFor(p.v) != null && (S.estimated || p.v.costKind !== "가격 추정")).map((p) => p.v);
     if (!all.length) {
+      PICKS = null;
       el.innerHTML = `<div class="pick pick-empty">${esc(emptyText(SR, ". "))}.</div>`;
       return;
     }
@@ -1365,6 +1437,7 @@
       if (!frontierPts.length || v.score > frontierPts[frontierPts.length - 1].score + 1e-9) frontierPts.push(v);
     const below = cheap ? frontierPts.filter((v) => costFor(v) < costFor(cheap) && v.score < cheap.score).reverse() : [];
     const valueRows = cheap ? [cheap, ...below.slice(0, 2)] : [];
+    PICKS = { top, value: cheap, alt: valueRows.length > 1 ? valueRows[valueRows.length - 1] : null };   // 큰 문장 · 지도 핀의 1) 2) 3)
 
     // ── 두 카드 공통 표: 성능(막대) · 비용 · "최고 성능과 비교: 성능 −○점 · 비용 ○% 절약/더 듦"
     //  · 비교 기준은 항상 최고 성능 1위, 막대 눈금도 두 카드가 같음 (길이를 서로 비교할 수 있게)
@@ -1746,7 +1819,7 @@
       const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
       S.theme = cur === "dark" ? "light" : "dark";
       document.documentElement.dataset.theme = S.theme;
-      document.querySelector('meta[name="theme-color"]').content = S.theme === "light" ? "#f4f3ee" : "#0a0b0d";
+      document.querySelector('meta[name="theme-color"]').content = S.theme === "light" ? "#ffffff" : "#0b0b0b";
       colorCache = {}; mutedCache = {}; save(); render();
     };
     // 누른 자리에서 새 색이 원으로 퍼지며 바뀜 (지원 안 되는 브라우저는 바로 바뀜)
