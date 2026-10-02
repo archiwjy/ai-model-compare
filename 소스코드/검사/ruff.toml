@@ -1,0 +1,38 @@
+# 파이썬 코드 검사 규칙 (ruff) — 검사.py 가 씀
+target-version = "py312"
+line-length = 160
+
+[lint]
+select = [
+  "E", "W",   # 기본 문법·모양
+  "F",        # 안 쓰는 변수·없는 이름
+  "B",        # 흔한 버그 모양
+  "UP",       # 옛날식 문법
+  "SIM",      # 더 단순하게 쓸 수 있는 곳
+  "PL",       # pylint 규칙
+  "RUF",      # ruff 자체 규칙
+  "PIE", "C4", "RET",
+  "BLE",      # 모든 오류를 뭉뚱그려 잡는 곳 (일부러 잡는 곳은 이유를 적고 noqa)
+  "S",        # 보안 (bandit)
+]
+ignore = [
+  "E501",     # 줄 길이 — 한국어 주석이 길다
+  "E402",     # 맨 위 sys.dont_write_bytecode 다음에 import — 구글 드라이브에 __pycache__ 를 만들지 않으려고 일부러
+  "PLR2004",  # 숫자 상수 비교 — 계산 코드라 의미 있는 숫자가 많음
+  "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR0917",   # 함수 길이·인자 수
+  "PLW0603",  # global 문 — 도우미 서버의 마지막 요청 시각
+  "PLC0415",  # 함수 안 import — 무거운 모듈은 필요할 때만, 순환 import 방지
+  "RUF001", "RUF002", "RUF003",   # 한국어와 비슷하게 생긴 문자 경고
+  "SIM108",   # 삼항 연산자 강요
+  "RET504",   # 돌려주기 전 변수 — 읽기 쉬워서 씀
+  "S310",     # urllib 로 주소 열기 — 주소는 코드에 정해 둔 https 뿐
+  "S603", "S607",   # git·gh 실행 — 정해 둔 명령만
+  "S311",     # random — 보안 용도 아님
+  "S101",     # assert
+]
+
+[lint.per-file-ignores]
+"테스트/*" = ["S", "PLR6301", "PLC2701", "SLF001", "B023", "PLW0108"]
+
+[format]
+quote-style = "double"

@@ -1,0 +1,12 @@
+{
+  "name": "ai-compare-checks",
+  "private": true,
+  "type": "module",
+  "description": "AI 모델 성능비교판 검사 도구 목록 (검사.py 가 드라이브 밖 도구 폴더에 설치)",
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "eslint": "9.39.5",
+    "globals": "17.13.0",
+    "typescript": "7.0.2"
+  }
+}

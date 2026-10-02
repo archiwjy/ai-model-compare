@@ -4,9 +4,10 @@
 #  1) Epoch 방식 능력치: 벤치마크마다 '난이도'와 '변별력'이 정해져 있다.
 #     모델(등급별)의 점수들을 가장 잘 설명하는 능력치 하나를 찾는다 (문항반응이론).
 #     → Epoch 공식 ECI와 같은 눈금 (GPT-5 = 150, Claude 3.5 Sonnet = 130)
-#  2) 다른 출처(AA, LiveBench, LMArena)는 겹치는 모델을 이용해 같은 눈금으로 옮긴다 (직선 맞춤).
-#  3) 출처마다 '다른 출처들의 합의와 얼마나 어긋나는지'를 재서, 덜 어긋나는 출처에 더 큰 비중을 준다.
-#     한 출처가 혼자 튀면 비중이 줄어들고, 화면에 '의견 차이'로 드러난다.
+#  2) 다른 출처(AA)는 겹치는 모델을 이용해 같은 눈금으로 옮긴다 (직선 맞춤).
+#  3) 출처마다 '다른 출처의 값과 얼마나 어긋나는지'를 재서 오차(±)로 쓴다.
+#     지금은 출처가 두 곳뿐이라 어긋남에는 두 출처의 오차가 함께 들어 있다 → 각 출처 몫을 나눌 근거가 없어
+#     둘 다 전체 어긋남을 자기 오차로 잡는다 (± 범위를 넉넉하게 = 보수적으로 보여 줌).
 #
 # [문제당 비용]
 #  실제 측정 비용(LiveBench, AA, DeepSWE 등)을 LiveBench 문제 1개 기준으로 환산해 합친다.
@@ -15,10 +16,11 @@
 import math
 import statistics
 
-from names import EFFORT_ORDER
-
-EXPLICIT = {"none", "minimal", "low", "medium", "high", "xhigh", "max", "promax"}
+EXPLICIT = {"none", "minimal", "low", "medium", "high", "xhigh", "max", "promax", "ultra"}
 AMBIGUOUS = {"default", "thinking"}
+# 등급을 올릴수록 비용이 줄지 않는 순서 (비용 배율을 이 순서로 맞춤)
+LADDER_CHAIN = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "promax", "ultra"]
+GRID = (0, 300)       # 능력치를 찾는 범위
 
 
 def _sig(x):
@@ -30,15 +32,16 @@ def _sig(x):
 
 
 def _fit_one(obs, prior=None, lam=0.0):
-    """obs = [(점수0~1, 난이도, 변별력)] → 능력치, 곡률"""
+    """obs = [(점수0~1, 난이도, 변별력)] → 능력치, 곡률, 잔차제곱합"""
     def loss(c):
-        l = sum((p - _sig(s * (c - d))) ** 2 for p, d, s in obs)
+        total = sum((p - _sig(s * (c - d))) ** 2 for p, d, s in obs)
         if prior is not None:
-            l += lam * (c - prior) ** 2
-        return l
-    best = min(range(40, 221), key=loss)
-    lo, hi = best - 1.0, best + 1.0
-    c = min((lo + i * 0.02 for i in range(101)), key=loss)
+            total += lam * (c - prior) ** 2
+        return total
+    lo, hi = GRID
+    best = min(range(lo, hi + 1, 2), key=loss)          # 2점 간격으로 대강 찾고
+    a = max(float(lo), best - 2.0)
+    c = min((a + i * 0.02 for i in range(int((min(float(hi), best + 2.0) - a) / 0.02) + 1)), key=loss)   # 0.02점 간격으로 다듬기
     h = sum((s * _sig(s * (c - d)) * (1 - _sig(s * (c - d)))) ** 2 for p, d, s in obs)
     if prior is not None:
         h += lam
@@ -56,10 +59,11 @@ def epoch_capability(ep):
             items[key] = o
 
     # 1단계: 벤치마크가 충분한 것들로 '오차 크기'와 '등급별 평균 차이' 파악
-    res, offs = [], {}
+    res: list[float] = []
+    offs: dict[str, list[float]] = {}
     for key, o in items.items():
         if len(o) >= 8:
-            c, h, r = _fit_one(o)
+            c, _h, r = _fit_one(o)
             res.append(r / max(1, len(o) - 1))
             e = info.get(key[0], {}).get("eci")
             if e is not None:
@@ -83,18 +87,25 @@ def epoch_capability(ep):
     return out, {"sigma2": sigma2, "effort_offset": delta}
 
 
-def drop_ambiguous(all_keys_by_source):
-    """명시 등급(낮음/높음 등)이 있는 모델에서 '기본'·'추론 켬'처럼 모호한 이름은 버린다.
-    단 '추론 끔'만 명시된 모델은 '기본'이 곧 추론 켠 상태이므로 버리지 않는다."""
-    explicit_bases = set()
-    for d in all_keys_by_source.values():
+def explicit_bases(sources):
+    """명시 등급(낮음/높음 등)이 하나라도 있는 기본이름들 ('추론 끔'만 있는 것은 제외)"""
+    out = set()
+    for d in sources:
         for (b, e) in d:
             if e in EXPLICIT and e != "none":
-                explicit_bases.add(b)
-    for name, d in all_keys_by_source.items():
-        for k in [k for k in d if k[1] in AMBIGUOUS and k[0] in explicit_bases]:
+                out.add(b)
+    return out
+
+
+def drop_ambiguous(all_keys_by_source, explicit=None):
+    """명시 등급(낮음/높음 등)이 있는 모델에서 '기본'·'추론 켬'처럼 모호한 이름은 버린다.
+    단 '추론 끔'만 명시된 모델은 '기본'이 곧 추론 켠 상태이므로 버리지 않는다.
+    explicit: 어느 모델이 명시 등급을 가졌는지 (없으면 넘겨준 출처들로 판단)"""
+    bases = explicit if explicit is not None else explicit_bases(all_keys_by_source.values())
+    for d in all_keys_by_source.values():
+        for k in [k for k in d if k[1] in AMBIGUOUS and k[0] in bases]:
             del d[k]
-    return explicit_bases
+    return bases
 
 
 def _ols(xs, ys):
@@ -103,7 +114,7 @@ def _ols(xs, ys):
     sxx = sum((x - mx) ** 2 for x in xs)
     if sxx <= 0:
         return None
-    b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sxx
+    b = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True)) / sxx
     return my - b * mx, b
 
 
@@ -128,14 +139,14 @@ def _rma(xs, ys):
 
 def fill_within_model(mapped):
     """같은 모델의 다른 등급에만 있는 출처 점수를, 등급 간 차이를 이용해 채운다.
-    예) LiveBench에 GPT-6 Astra '최대'만 있으면, Epoch에서 본 '최대→중간' 차이만큼 빼서 '중간' 값을 추정.
+    예) AA에 GPT-6 Astra '최대'만 있으면, Epoch에서 본 '최대→중간' 차이만큼 빼서 '중간' 값을 추정.
     이렇게 하면 한 모델의 모든 점이 같은 출처 조합으로 계산돼 선 모양이 뒤틀리지 않는다."""
-    by_base = {}
+    by_base: dict[str, dict] = {}
     for (b, e), per in mapped.items():
         by_base.setdefault(b, {})[e] = per
     added = 0
-    for b, effs in by_base.items():
-        all_src = set()
+    for effs in by_base.values():
+        all_src: set[str] = set()
         for per in effs.values():
             all_src |= set(per)
         for e, per in effs.items():
@@ -169,15 +180,15 @@ def _corr(xs, ys):
     sy = math.sqrt(sum((y - my) ** 2 for y in ys))
     if sx == 0 or sy == 0:
         return 0.0
-    return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / (sx * sy)
+    return sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True)) / (sx * sy)
 
 
 def consensus_scores(src):
     """src = {출처: {key: (값, 표준오차)}}  — 'epoch'가 눈금 기준.
     반환: 등급별 출처 점수(같은 눈금), 출처별 맞춤 정보"""
     mapping = {"epoch": (0.0, 1.0)}
-    noise = {s: 9.0 for s in src}
-    mapped = {}
+    noise = dict.fromkeys(src, 9.0)
+    mapped: dict[tuple, dict] = {}
 
     def remap():
         mapped.clear()
@@ -216,12 +227,13 @@ def consensus_scores(src):
                 fit = _rma(xs, ys)
                 if not fit or fit[1] <= 0:
                     info[s] = {"n": len(pairs), "used": False}
+                    mapping.pop(s, None)
                     continue
                 # 크게 튀는 점을 빼고 다시 맞춤
                 a, b = fit
                 r = [y - (a + b * x) for x, y in pairs]
                 mad = statistics.median([abs(v) for v in r]) or 1.0
-                keep = [p for p, rv in zip(pairs, r) if abs(rv) <= 4 * 1.48 * mad]
+                keep = [p for p, rv in zip(pairs, r, strict=True) if abs(rv) <= 4 * 1.48 * mad]
                 if len(keep) >= 6:
                     fit2 = _rma([p[0] for p in keep], [p[1] for p in keep])
                     if fit2 and fit2[1] > 0:
@@ -239,24 +251,44 @@ def consensus_scores(src):
     return mapped, info
 
 
-def combine_costs(cost_src, ref="LiveBench"):
-    """비용 출처들을 기준 출처(LiveBench 문제 1개) 단위로 환산해 합친다 (로그 평균)."""
-    logs = {s: {k: math.log(c) for k, c in d.items() if c > 0} for s, d in cost_src.items()}
-    off = {ref: 0.0} if ref in logs else {}
-    if not off and logs:
-        first = max(logs, key=lambda s: len(logs[s]))
-        off[first] = 0.0
-    info = {}
-    cons = {}
-    for _ in range(8):
-        cons = {}
+def combine_costs(cost_src, ref="LiveBench", anchor=None):
+    """비용 출처들을 기준 출처(LiveBench 문제 1개) 단위로 환산해 합친다 (로그 평균).
+    · 기준 출처가 오늘 비어 있으면, 지난번 환산 비율(anchor = {출처: 비율})로 같은 단위를 유지한다
+      (기준이 빠졌다고 비용이 갑자기 몇 배로 뛰지 않게)
+    · 그것도 없으면 가장 기록이 많은 출처를 기준으로 삼고 info 에 ref 로 표시한다"""
+    logs = {s: {k: math.log(c) for k, c in d.items() if isinstance(c, (int, float)) and math.isfinite(c) and c > 0}
+            for s, d in cost_src.items()}
+    logs = {s: d for s, d in logs.items() if d}
+    if not logs:
+        return {}, {}
+    fixed: dict[str, float] = {}
+    if ref in logs:
+        fixed[ref] = 0.0
+    else:
+        anc = {s: math.log(f) for s, f in (anchor or {}).items()
+               if s in logs and isinstance(f, (int, float)) and math.isfinite(f) and f > 0}
+        if anc:
+            s0 = max(anc, key=lambda s: len(logs[s]))
+            fixed[s0] = anc[s0]
+        else:
+            fixed[max(logs, key=lambda s: len(logs[s]))] = 0.0
+    off = dict(fixed)
+    n_used: dict[str, int] = {}
+
+    def consensus():
+        cons: dict[tuple, list] = {}
         for s, d in logs.items():
             if s not in off:
                 continue
             for k, v in d.items():
                 cons.setdefault(k, []).append((s, v + off[s]))
+        return cons
+
+    for _ in range(200):     # 바뀜이 거의 없을 때까지 (보통 수십 번)
+        cons = consensus()
+        change = 0.0
         for s, d in logs.items():
-            if s == ref:
+            if s in fixed:
                 continue
             diffs = []
             for k, v in d.items():
@@ -264,75 +296,153 @@ def combine_costs(cost_src, ref="LiveBench"):
                 if others:
                     diffs.append(sum(others) / len(others) - v)
             if len(diffs) >= 3:
-                off[s] = statistics.median(diffs)
-                info[s] = {"n": len(diffs), "factor": round(math.exp(off[s]), 4)}
+                new = statistics.median(diffs)
+                change = max(change, abs(new - off.get(s, new + 1)))
+                off[s] = new
+                n_used[s] = len(diffs)
+        if change < 1e-9:
+            break
+    cons = consensus()           # 마지막 비율로 한 번 더 → 합친 값과 표시하는 비율이 같은 계산에서 나옴
     merged = {k: (sum(x for _, x in v) / len(v), sorted({s for s, _ in v})) for k, v in cons.items()}
-    info[ref] = {"n": len(logs.get(ref, {})), "factor": 1.0}
+    info = {}
+    for s, o in off.items():
+        info[s] = {"n": len(logs[s]) if s in fixed else n_used.get(s, 0), "factor": round(math.exp(o), 4)}
+        if s in fixed:
+            info[s]["ref"] = True
     return merged, info
 
 
 DEFAULT_EFFORT_LOG = {"none": math.log(0.15), "minimal": math.log(0.25), "low": math.log(0.4),
                       "medium": math.log(0.65), "default": 0.0, "thinking": 0.0, "high": 0.0,
-                      "xhigh": math.log(1.5), "max": math.log(2.3), "promax": math.log(4.0)}
+                      "xhigh": math.log(1.5), "max": math.log(2.3), "promax": math.log(4.0), "ultra": math.log(6.0)}
+
+
+def _monotone(lad, counts):
+    """명시 등급은 올라갈수록 비용이 줄지 않게 (이웃끼리 순서가 뒤집히면 둘을 묶어 가중 평균 — PAV)"""
+    chain = [e for e in LADDER_CHAIN if e in lad]
+    blocks = [[lad[e], max(1, counts.get(e, 0)), [e]] for e in chain]
+    i = 0
+    while i < len(blocks) - 1:
+        if blocks[i][0] > blocks[i + 1][0] + 1e-12:
+            a, b = blocks[i], blocks[i + 1]
+            w = a[1] + b[1]
+            blocks[i] = [(a[0] * a[1] + b[0] * b[1]) / w, w, a[2] + b[2]]
+            del blocks[i + 1]
+            i = max(0, i - 1)
+        else:
+            i += 1
+    out = dict(lad)
+    for v, _w, es in blocks:
+        for e in es:
+            out[e] = v
+    return out
+
+
+def _components(by_base, efforts):
+    """같은 모델 안에 함께 나오는 등급끼리 이어진 묶음들 (서로 비교할 수 있는 등급끼리)"""
+    parent = {e: e for e in efforts}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    for d in by_base.values():
+        es = [e for e in d if e in parent]
+        for e2 in es[1:]:
+            parent[find(e2)] = find(es[0])
+    groups: dict[str, list] = {}
+    for e in efforts:
+        groups.setdefault(find(e), []).append(e)
+    return list(groups.values())
 
 
 def effort_ladder(merged):
-    """같은 모델 안에서 등급을 올리면 비용이 몇 배 되는지 (데이터로 추정, 부족하면 기본값)"""
-    by_base = {}
-    for (b, e), (l, _) in merged.items():
-        by_base.setdefault(b, {})[e] = l
+    """같은 모델 안에서 등급을 올리면 비용이 몇 배 되는지 (데이터로 추정, 부족하면 기본값)
+    · 서로 맞물린 값이라 조금씩(절반씩) 고쳐 가며 바뀜이 없을 때까지 반복 (예전엔 30번에서 끊어 값이 출렁였음)
+    · 자료가 적은 등급은 기본값 쪽으로 당김 (모델 수 기준)
+    · 서로 비교할 수 있는 등급 묶음마다 높이를 정함: '높음'이 든 묶음은 높음 = 1배,
+      '기본'·'추론 켬'처럼 따로 떨어진 묶음은 기본값의 평균 높이 (자료 없는 등급은 기본값 그대로)
+    · 명시 등급은 순서대로 비용이 줄지 않게 맞춤"""
+    by_base: dict[str, dict] = {}
+    for (b, e), (lv, _) in merged.items():
+        by_base.setdefault(b, {})[e] = lv
     lad = dict(DEFAULT_EFFORT_LOG)
-    counts = {}
-    for _ in range(30):
+    comps = _components(by_base, list(lad))
+    counts: dict[str, int] = {}
+    models: dict[str, int] = {}
+
+    def anchor(x):
+        for comp in comps:
+            if "high" in comp:
+                shift = x["high"] - DEFAULT_EFFORT_LOG["high"]
+            else:
+                shift = sum(x[e] - DEFAULT_EFFORT_LOG[e] for e in comp) / len(comp)
+            for e in comp:
+                x[e] -= shift
+        return x
+
+    for _ in range(2000):
         new = {}
         for e in lad:
             vals = []
-            for b, d in by_base.items():
+            nm = 0
+            for d in by_base.values():
                 if e in d:
-                    for e2, l2 in d.items():
-                        if e2 != e and e2 in lad:
-                            vals.append(d[e] - l2 + lad[e2])
+                    got = [d[e] - l2 + lad[e2] for e2, l2 in d.items() if e2 != e and e2 in lad]
+                    if got:
+                        nm += 1
+                        vals += got
             counts[e] = len(vals)
+            models[e] = nm
             if vals:
-                est = statistics.median(vals)
-                w = min(1.0, len(vals) / 8)       # 자료가 적으면 기본값 쪽으로
-                new[e] = w * est + (1 - w) * DEFAULT_EFFORT_LOG[e]
+                w = min(1.0, nm / 8)       # 자료(모델 수)가 적으면 기본값 쪽으로
+                new[e] = w * statistics.median(vals) + (1 - w) * DEFAULT_EFFORT_LOG[e]
             else:
-                new[e] = lad[e]
-        shift = new["high"]
-        lad = {e: v - shift for e, v in new.items()}
+                new[e] = DEFAULT_EFFORT_LOG[e]
+        new = anchor({e: 0.5 * lad[e] + 0.5 * v for e, v in new.items()})
+        change = max(abs(new[e] - lad[e]) for e in lad)
+        lad = new
+        if change < 1e-10:
+            break
+    lad = _monotone(lad, models)
+    shift = lad["high"]
+    chain = {e for comp in comps if "high" in comp for e in comp} | set(LADDER_CHAIN)
+    lad = {e: (v - shift if e in chain else v) for e, v in lad.items()}
     return lad, counts
 
 
 def fill_costs(keys, merged, ladder, prices):
-    """모든 등급에 비용 채우기 → {key: (비용$, 종류, 출처목록)}"""
-    by_base = {}
-    for (b, e), (l, s) in merged.items():
-        by_base.setdefault(b, {})[e] = l
+    """모든 등급에 비용 채우기 → {key: (비용$, 종류, 출처목록)}
+    배율을 모르는 처음 보는 등급은 짐작하지 않음 ('비용 없음'이 틀린 숫자보다 나음)"""
+    by_base: dict[str, dict] = {}
+    for (b, e), (lv, _s) in merged.items():
+        by_base.setdefault(b, {})[e] = lv
     # 가격표 → 비용 환산 계수
     ks = []
-    for (b, e), (l, _) in merged.items():
+    for (b, e), (lv, _) in merged.items():
         p = prices.get(b)
-        if p:
+        if p and e in ladder:
             pi = p["in"] + p["out"]
             if pi > 0:
-                ks.append(l - ladder.get(e, 0) - math.log(pi))
+                ks.append(lv - ladder[e] - math.log(pi))
     k_price = statistics.median(ks) if ks else math.log(0.01)
     out = {}
     for key in keys:
         b, e = key
         if key in merged:
-            l, srcs = merged[key]
-            out[key] = (math.exp(l), "측정", srcs)
+            lv, srcs = merged[key]
+            out[key] = (math.exp(lv), "측정", srcs)
+            continue
+        if e not in ladder:
             continue
         d = by_base.get(b)
-        if d:
-            ests = [l2 - ladder.get(e2, 0) for e2, l2 in d.items()]
-            l = statistics.fmean(ests) + ladder.get(e, 0)
-            out[key] = (math.exp(l), "등급 환산", [])
+        ests = [l2 - ladder[e2] for e2, l2 in d.items() if e2 in ladder] if d else []
+        if ests:
+            out[key] = (math.exp(statistics.fmean(ests) + ladder[e]), "등급 환산", [])
             continue
         p = prices.get(b)
         if p and p["in"] + p["out"] > 0:
-            l = math.log(p["in"] + p["out"]) + k_price + ladder.get(e, 0)
-            out[key] = (math.exp(l), "가격 추정", [])
+            lv = math.log(p["in"] + p["out"]) + k_price + ladder[e]
+            out[key] = (math.exp(lv), "가격 추정", [])
     return out, k_price

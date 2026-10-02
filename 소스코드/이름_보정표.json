@@ -1,18 +1,48 @@
 {
-  "설명": "출처마다 모델 이름이 달라서 자동으로 못 맞추는 경우 여기에 손으로 적는다. 왼쪽 이름을 오른쪽 이름으로 바꾼다.",
+  "설명": "출처마다 모델 이름이 달라서 자동으로 못 맞추는 경우 여기에 손으로 적는다. 형식이 틀려도 수집은 멈추지 않고 그 줄만 건너뛴다 (실행 기록에 경고).",
   "기본이름_별칭": {
     "kimi-k2p5": "kimi-k2-5",
-    "gemini-3-pro-preview": "gemini-3-pro"
+    "gemini-3-pro-preview": "gemini-3-pro",
+    "grok-4-20-0309": "grok-4-20",
+    "grok-3-beta": "grok-3",
+    "grok-3-mini-beta": "grok-3-mini",
+    "nemotron-3-ultra-550b-a55b": "nemotron-3-ultra",
+    "llama-4-maverick-17b-128e-instruct": "llama-4-maverick",
+    "llama-4-maverick-17b-128e-instruct-fp8": "llama-4-maverick",
+    "llama-4-scout-17b-16e-instruct": "llama-4-scout",
+    "qwen-max": "qwen2-5-max"
   },
   "max가_이름인_모델": [
     "^qwen[0-9\\-]*$",
     "^qwen[0-9\\-]*-preview$"
   ],
+  "등급단어가_이름인_모델_설명": "이름 끝의 등급 단어(max·medium 등)가 등급이 아니라 모델 이름의 일부인 경우. 단어 → 그 단어를 뺀 나머지 이름의 패턴",
+  "등급단어가_이름인_모델": {
+    "max": [
+      "^qwen-vl$",
+      "^gpt-[0-9\\-]+-codex$",
+      "^fugu$"
+    ],
+    "medium": [
+      "^(mistral|devstral|magistral)$"
+    ]
+  },
+  "추론이_별개모델_설명": "'-thinking' 이 등급이 아니라 따로 출시된 모델 이름의 일부인 경우 (전체 기본이름 패턴)",
+  "추론이_별개모델": [
+    "^kimi-k2-thinking$"
+  ],
+  "이름별_등급_설명": "원래 이름 → 추론 등급 (API 별칭처럼 이름만 봐서는 등급을 알 수 없는 경우)",
+  "이름별_등급": {
+    "deepseek-chat": "none",
+    "deepseek-reasoner": "thinking"
+  },
   "제외할_이름_포함어": [
     "pre-release",
     "preview-early",
     "-early",
     "web-app",
+    "webapp",
+    "(chatgpt)",
     "multi-agent"
   ]
 }
