@@ -1455,15 +1455,26 @@
     // ── 가성비 추천 1위: "최고 성능과 실력 차이가 오차 범위 안인 것" 중 가장 싼 것
     //  · 고정된 몇 점이 아니라 두 점수의 오차를 합친 범위(√(오차₁²+오차₂²))로 비교 (그래프의 오차 띠와 같은 원리)
     //  · 비용은 실제로 잰 값만 (추정 비용 그리기를 켜면 추정도 포함)
+    //  · 비용 차이가 10% 안이면 '사실상 같은 값'으로 보고, 그중 점수가 가장 높은 것을 고름
+    //    (예: high $0.634 · xhigh $0.648 처럼 2% 차이면 1.5점 높은 xhigh — 비용 측정 오차보다 작은 차이로 더 낮은 점수를 고르지 않게)
+    const SAME_COST = 1.1;
     const near = withCost.filter((v) => top.score - v.score <= band(v)).sort((a, b) => costFor(a) - costFor(b));
-    const cheap = near[0] || null;
+    const cheap = near.length ? near.filter((v) => costFor(v) <= costFor(near[0]) * SAME_COST).sort((a, b) => b.score - a.score || costFor(a) - costFor(b))[0] : null;
     // 가성비 2위·3위: 가성비 경계선을 따라 1위보다 싼 쪽으로 내려가며 (점수는 조금 낮지만 더 싼 모델)
     //  · 경계선 = 싼 순서로 보면서 앞의 것보다 점수가 높은 것만 → 각자 그 가격대에서 가장 좋은 모델
     const frontierPts = [];
     for (const v of withCost.slice().sort((a, b) => costFor(a) - costFor(b) || b.score - a.score))
       if (!frontierPts.length || v.score > frontierPts[frontierPts.length - 1].score + 1e-9) frontierPts.push(v);
-    const below = cheap ? frontierPts.filter((v) => costFor(v) < costFor(cheap) && v.score < cheap.score).reverse() : [];
-    const valueRows = cheap ? [cheap, ...below.slice(0, 2)] : [];
+    //  · 바로 앞 추천보다 10% 이상 싼 것만 다음 순위로 (몇 % 차이밖에 안 나는데 점수만 낮은 추천은 빼고)
+    const below = [];
+    if (cheap) {
+      let prev = cheap;
+      for (const v of frontierPts.filter((x) => costFor(x) < costFor(cheap) && x.score < cheap.score).reverse()) {
+        if (costFor(v) * SAME_COST <= costFor(prev)) { below.push(v); prev = v; }
+        if (below.length >= 2) break;
+      }
+    }
+    const valueRows = cheap ? [cheap, ...below] : [];
     PICKS = { top, value: cheap, alt: valueRows.length > 1 ? valueRows[valueRows.length - 1] : null };   // 큰 문장 · 지도 핀의 1) 2) 3)
 
     // ── 두 카드 공통 표: 성능(막대) · 비용 · "최고 성능과 비교: 성능 −○점 · 비용 ○% 절약/더 듦"
@@ -1511,7 +1522,8 @@
     }
     // 가성비 추천: 1위 추천이 얼마나 확실한지 (두 기관 측정? 비용 실측? 다음 후보와 가격 차이가 충분한가?)
     if (cheap) {
-      const next = near[1] || null;
+      // 비교 상대: 1위보다 비싼 쪽의 사실상 동급 후보 중 가장 싼 것 (1위보다 싸지만 '같은 값'이라 합친 점수 낮은 후보는 제외)
+      const next = near.find((v) => v !== cheap && costFor(v) >= costFor(cheap)) || null;
       const nextRatio = next ? costFor(next) / costFor(cheap) : null;
       const checks = [
         cheap.nReal >= 2 ? { ok: true, t: "두 기관 모두 측정" } : { ok: false, t: "한 기관만 측정" },
@@ -1520,7 +1532,7 @@
       ];
       const nOk = checks.filter((c) => c.ok).length;
       const level = nOk === 3 ? { k: "hi", t: "1위 확실" } : nOk === 2 ? { k: "mid", t: "1위 대체로 확실" } : { k: "lo", t: "1위 참고용" };
-      cards.push({ kind: "value", label: "가성비 추천", icon: ICON_VALUE, sub: "성능 높은 순", tip: "1위: 최고 성능과 실력 차이가 오차 범위 안(사실상 동급)인 것 중 가장 싼 것 · 2·3위: 가성비 경계선을 따라 1위보다 싼 모델", v: cheap,
+      cards.push({ kind: "value", label: "가성비 추천", icon: ICON_VALUE, sub: "성능 높은 순", tip: "1위: 최고 성능과 실력 차이가 오차 범위 안(사실상 동급)인 것 중 가장 싼 것 — 비용 차이가 10% 안이면 같은 값으로 보고 점수가 높은 쪽 · 2·3위: 가성비 경계선을 따라 바로 앞보다 10% 이상 싼 모델", v: cheap,
         html: rowsHtml(valueRows) + confHtml(level, checks, "1위 추천이 얼마나 확실한지. 확실: 세 가지 모두 충족 · 대체로 확실: 두 가지 · 참고용: 한 가지 이하") });
     }
 
