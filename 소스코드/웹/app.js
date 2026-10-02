@@ -424,6 +424,7 @@
     renderCards(points, SR);   // 오늘의 답(PICKS)을 먼저 정함 → 지도의 각주 핀 · 큰 문장에 씀
     renderChart(list, points);
     renderHeadline();
+    bindHeadlineLinks();
     placeCallouts();
     renderMinimap(points);
     renderTable(list);
@@ -492,8 +493,9 @@
     const P = PICKS;
     if (!P) { el.textContent = "돈을 쓴 만큼 똑똑한 AI는 무엇일까"; if (notes) notes.innerHTML = ""; return; }
     const sup = (n) => `<sup>${n})</sup>`;
-    const nm = (v) => `<span class="nm">${esc(v.m.name)}</span><span class="ef">${esc(v.eff)}</span>`;
-    const ef = (v) => `<span class="nm">${esc(v.eff)}</span>`;
+    const att = (v) => ` data-key="${esc(v.m.key)}" data-eff="${esc(v.effort)}" tabindex="0" role="button" title="누르면 지도에 고정하고 자세히 보기"`;
+    const nm = (v) => `<span class="nm"${att(v)}>${esc(v.m.name)}</span><span class="ef">${esc(v.eff)}</span>`;
+    const ef = (v) => `<span class="nm"${att(v)}>${esc(v.eff)}</span>`;
     const save = (v) => { const a = costFor(v), b = costFor(P.top); return a && b ? Math.min(99, Math.round((1 - a / b) * 100)) : 0; };
     let h = `지금 가장 똑똑한 AI는 ${nm(P.top)}${sup(1)}.`;
     if (P.value && P.value !== P.top) {
@@ -508,8 +510,23 @@
     } else if (P.value) h += ".";
     el.innerHTML = h;
     if (notes) {
-      const row = (n, v) => `<li><b>${n})</b><span>${esc(v.m.name)} · ${esc(v.eff)}</span> — 종합 ${v.score.toFixed(1)}점 · ${esc(costUnit())} ${fmtCost(costFor(v))}</li>`;
+      const row = (n, v) => `<li data-key="${esc(v.m.key)}" data-eff="${esc(v.effort)}"><b>${n})</b><span>${esc(v.m.name)} · ${esc(v.eff)}</span> — 종합 ${v.score.toFixed(1)}점 · ${esc(costUnit())} ${fmtCost(costFor(v))}</li>`;
       notes.innerHTML = [[1, P.top], [2, P.value], [3, P.alt]].filter(([n, v]) => v && (n === 1 || v !== P.top) && !(n === 3 && v === P.value)).map(([n, v]) => row(n, v)).join("");
+    }
+  }
+  // 큰 문장·각주의 모델 이름 ↔ 지도의 점 (마우스를 올리면 강조, 누르면 고정 + 상세)
+  function bindHeadlineLinks() {
+    for (const host of [$("#headline"), $("#notes")]) {
+      if (!host || host.__bound) continue;
+      host.__bound = true;
+      const pick = (e) => e.target.closest("[data-key]");
+      host.addEventListener("mouseover", (e) => {
+        const t = pick(e); if (!t || t === host.__hov) return;
+        host.__hov = t; chart.dispatchAction({ type: "downplay" }); focusPoint(t.dataset.key, t.dataset.eff);
+      });
+      host.addEventListener("mouseleave", () => { host.__hov = null; chart.dispatchAction({ type: "downplay" }); chart.dispatchAction({ type: "hideTip" }); });
+      host.addEventListener("click", (e) => { const t = pick(e); if (t) pinAndShow(t.dataset.key, t.dataset.eff); });
+      host.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && pick(e)) { e.preventDefault(); pick(e).click(); } });
     }
   }
   // 확대·이동할 때 핀을 점에 맞춰 옮김
@@ -564,18 +581,24 @@
   }
 
   // ───────── 최근 30일 새 모델: 흐르는 띠 (누르면 그 모델 고정 + 상세)
+  let tickerAll = false;
   function renderTicker(all) {
     const el = $("#ticker");
     if (!el) return;
-    const fresh = all.filter((M) => M.date && daysSince(M.date) <= 30).sort((a, b) => b.date.localeCompare(a.date) || b.best.score - a.best.score).slice(0, 24);
+    const fresh = all.filter((M) => M.date && daysSince(M.date) <= 30).sort((a, b) => b.date.localeCompare(a.date) || b.best.score - a.best.score);
     if (!fresh.length) { el.hidden = true; return; }
-    const item = (M, dup) => `<button type="button" class="tk-item" data-key="${esc(M.key)}"${dup ? ' tabindex="-1" aria-hidden="true"' : ""}>` +
+    const shown = tickerAll ? fresh : fresh.slice(0, 6);
+    const row = (M) => `<button type="button" class="tk-item" data-key="${esc(M.key)}" title="누르면 지도에 고정하고 자세히 보기">` +
       `<span class="sym">${symbolSvg(styleOf(M.company).sym, mutedOf(M.company))}</span><b>${esc(M.name)}</b>` +
-      `<span class="tk-meta">${esc(M.date.slice(5).replace("-", "."))} · ${M.best.score.toFixed(1)}</span></button>`;
-    el.innerHTML = `<span class="tk-label"><i></i>최근 30일 새 모델 <b>${fresh.length}</b></span>` +
-      `<div class="tk-track"><div class="tk-move" style="--dur:${Math.max(40, fresh.length * 5)}s">${fresh.map((M) => item(M)).join("")}${fresh.map((M) => item(M, true)).join("")}</div></div>`;
+      `<span class="tk-meta">${esc(M.date.slice(5).replace("-", "."))} 출시</span><span class="tk-score">${M.best.score.toFixed(1)}</span></button>`;
+    el.innerHTML = `<h3 class="sub-h">새로 나온 모델 <b>${fresh.length}</b><small>최근 30일 · 최고 등급 점수</small></h3>` +
+      `<div class="nl-rows">${shown.map(row).join("")}</div>` +
+      (fresh.length > shown.length ? `<button type="button" class="nl-more">${fresh.length - shown.length}개 더 보기</button>` : "");
     el.hidden = false;
-    el.onclick = (e) => { const b = e.target.closest(".tk-item"); if (b) pinAndShow(b.dataset.key); };
+    el.onclick = (e) => {
+      if (e.target.closest(".nl-more")) { tickerAll = true; renderTicker(all); return; }
+      const b = e.target.closest(".tk-item"); if (b) pinAndShow(b.dataset.key);
+    };
   }
 
   // ───────── 그래프 그리기
@@ -890,10 +913,10 @@
     SIDX = new Map();
     series.forEach((s2, i) => { if (s2.type === "line" && !String(s2.id).startsWith("__")) SIDX.set(s2.id, { i, effs: s2.data.map((d) => d.v.effort) }); });
 
-    const axLabel = { fontFamily: mono, fontSize: 11 };
+    const axLabel = { fontFamily: mono, fontSize: 11.5 };
     const xAxis = S.x === "date"
       ? Object.assign({ type: "time", splitLine: { show: true, lineStyle: { color: grid } }, axisLine: { lineStyle: { color: axis } }, axisTick: { show: false } }, dateAxisView(V, muted))
-      : Object.assign({ type: "log", logBase: 10, splitLine: { show: true, lineStyle: { color: grid } }, axisLine: { lineStyle: { color: axis } }, minorSplitLine: { show: false } }, logAxisView(V, muted));
+      : Object.assign({ type: "log", logBase: 10, splitLine: { show: true, lineStyle: { color: grid } }, axisLine: { lineStyle: { color: txt, width: 1 } }, minorSplitLine: { show: false } }, logAxisView(V, muted));
     Object.assign(xAxis.axisLabel, axLabel);
     let yPointer = { show: false };
     if (CAN_HOVER && !narrow) {   // 마우스를 따라오는 십자선과 눈금 읽기 (계기판처럼)

@@ -16,9 +16,10 @@
 <meta name="color-scheme" content="light dark">
 <meta name="apple-mobile-web-app-title" content="AI 성능비교">
 <meta name="mobile-web-app-capable" content="yes">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" type="image/png" href="icons/favicon-64.png">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest?v=7">
+<link rel="icon" type="image/png" sizes="64x64" href="icons/favicon-64.png?v=7">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png?v=7">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=7">
 <title>AI 모델 성능비교판</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="style.css">
@@ -28,11 +29,14 @@
 <!-- ───────── 머리칸: 검은 선으로 나눈 격자 + 동그란 메뉴 ───────── -->
 <header class="topbar" id="topbar">
   <div class="topbar-in">
-    <a class="brand cell" href="#top" aria-label="맨 위로"><span>AI 모델</span><span>성능비교판</span></a>
-    <div class="cell head-info"><div class="status" id="status"></div><span class="head-sub">Epoch AI · Artificial Analysis 점수 합산</span></div>
+    <a class="brand cell" href="#top" aria-label="맨 위로">
+      <svg class="mark" viewBox="0 0 40 40" aria-hidden="true"><path d="M5 33H13V24H21V15H29V7H36"/><circle cx="29" cy="3.5" r="3.5"/></svg>
+      <span class="brand-t"><b>AI 모델</b><b>성능비교판</b></span>
+    </a>
+    <div class="cell head-info"><div class="status" id="status"></div><span class="head-sub">Epoch AI · Artificial Analysis 두 기관 점수를 합친 종합 성능</span></div>
     <nav class="cell topnav" id="topnav" aria-label="구역 바로가기">
       <span class="tn-ind" aria-hidden="true"></span>
-      <a href="#map" class="circ">지도</a>
+      <a href="#top" class="circ">지도</a>
       <a href="#rankHead" class="circ">순위표</a>
       <a href="#srcHead" class="circ">출처</a>
     </nav>
@@ -48,165 +52,162 @@
 
 <div id="notice" class="notice" hidden></div>
 
-<!-- 최근 30일 새 모델 (흐르는 띠, 누르면 상세) -->
-<div class="ticker" id="ticker" hidden></div>
+<!-- ───────── 지면: 왼쪽 지도(조절 장치와 함께 고정) · 오른쪽 기사 ───────── -->
+<main class="spread" id="top">
 
-<main class="page" id="top">
+  <div class="col-map" id="map">
+    <!-- 조절: 글자 목록 (고른 것은 검정, 나머지는 회색) — 휴대폰은 아래 막대 + 올라오는 판 -->
+    <div class="dock-scrim" id="dockScrim" hidden></div>
+    <section class="dock" id="dock" aria-label="보기 조절">
+      <div class="dock-in">
+        <div class="dock-sheet">
+          <div class="sheet-title">보기 조절</div>
+          <div class="ctl">
+            <span class="ctl-label">가로축</span>
+            <div class="seg" id="xAxisSeg">
+              <button data-v="cost" type="button" title="문제 1개를 푸는 데 실제로 든 돈">문제당 비용</button>
+              <button data-v="costok" type="button" title="문제당 비용 ÷ 정답률 (매우 어려운 문제 기준). 자주 틀리는 모델일수록 비싸져요">맞힌 문제당</button>
+            </div>
+          </div>
+          <div class="ctl">
+            <span class="ctl-label">출시</span>
+            <div class="seg" id="periodSeg">
+              <button data-v="3" type="button">3개월</button>
+              <button data-v="6" type="button">6개월</button>
+              <button data-v="12" type="button">1년</button>
+              <button data-v="0" type="button">전체</button>
+            </div>
+          </div>
+          <div class="ctl ctl-perco">
+            <span class="ctl-label">회사마다</span>
+            <div class="menu" id="perCoMenu">
+              <button class="menu-btn" type="button" aria-haspopup="listbox" aria-label="회사마다 보여 줄 모델 개수" title="회사마다 점수 높은 순으로 몇 개씩 보여 줄지 (검색 결과에도 똑같이 적용 · 가성비 경계선 위 모델과 고정한 모델은 개수와 상관없이 함께 보여요)"><span id="perCoText">3개</span></button>
+              <div class="menu-pop" role="listbox"></div>
+            </div>
+          </div>
+          <div class="ctl ctl-view" id="viewMenu">
+            <span class="ctl-label">보기</span>
+            <button class="menu-btn" type="button" hidden>보기</button>
+            <div class="menu-pop">
+              <label class="tog"><input type="checkbox" id="optFrontier"><i></i><span>경계선</span></label>
+              <label class="tog"><input type="checkbox" id="optLabels"><i></i><span>이름</span></label>
+              <label class="tog" title="평가기관이 따로 쟀지만 실제 AI 에선 못 고르는 등급은 숨김 (예: 생각을 끌 수 없는 GPT-6 Astra 의 none)"><input type="checkbox" id="optSelectable"><i></i><span>고를 수 있는 등급만</span></label>
+              <label class="tog" title="측정 기록이 없어 가격표로 추정한 점 (속이 빈 점)"><input type="checkbox" id="optEstimated"><i></i><span>추정 비용</span></label>
+              <button class="menu-reset" id="resetSettings" type="button" title="맞힌 문제당 · 전체 기간 · 회사마다 3개 · 경계선·이름 켬 · 고를 수 있는 등급만 · 추정 비용 끔 · 상위 5개 회사만 · 흰 화면">처음 설정으로</button>
+            </div>
+          </div>
+        </div>
+        <div class="dock-bar">
+          <div class="ctl ctl-search">
+            <span class="ctl-label">찾기</span>
+            <label class="search">
+              <input id="search" type="search" placeholder="모델 이름 · 쉼표로 여러 개" title="쉼표로 여러 개를 한 번에 찾을 수 있어요. 예: 제미나이, gpt, claude opus (한글 이름도 됨)" aria-label="모델 찾기" autocomplete="off">
+              <kbd class="kbd-slash" aria-hidden="true">/</kbd>
+            </label>
+          </div>
+          <button class="dock-toggle" id="dockToggle" type="button" aria-expanded="false" aria-label="보기 조절 열기"><span class="dt-open">조절</span><span class="dt-close">완료</span></button>
+        </div>
+      </div>
+    </section>
 
-  <!-- ───────── 큰 문장으로 쓴 오늘의 답 (각주 번호 = 지도의 파란 핀) ───────── -->
-  <section class="lead" id="mapHead">
-    <p class="kicker"><span>오늘의 답</span><span class="kdate" id="heroDate"></span></p>
-    <h1 class="headline" id="headline">돈을 쓴 만큼 똑똑한 AI는 무엇일까</h1>
-    <div class="lead-sub">
-      <p class="lede">점 하나 = 모델 × 추론 등급. 위로 갈수록 똑똑하고, 왼쪽으로 갈수록 쌉니다. <b>파란 계단(가성비 경계선)</b> 위의 점을 고르면 돈을 낭비하지 않아요.</p>
+    <section class="chart-box" id="chartBox">
+      <div class="chart-head">
+        <div class="legend" id="legend"></div>
+        <div class="chart-tools">
+          <button id="zoomIn" class="cbtn" type="button" title="확대" aria-label="확대"><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button>
+          <button id="zoomOut" class="cbtn" type="button" title="축소" aria-label="축소"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+          <button id="resetZoom" class="cbtn" type="button" title="처음 화면으로" aria-label="처음 화면으로"><svg viewBox="0 0 24 24"><path d="M5 12a7 7 0 1 0 2-5M5 4v4h4"/></svg></button>
+          <button id="fullBtn" class="cbtn" type="button" title="그래프만 화면 가득 (휴대폰은 가로로 돌리면 더 넓게)" aria-label="크게 보기"><svg viewBox="0 0 24 24"><path d="M5 10V5h5M19 10V5h-5M5 14v5h5M19 14v5h-5"/></svg><span id="fullText" hidden>크게 보기</span></button>
+        </div>
+      </div>
+      <div class="map-bars">
+        <div class="search-note" id="searchNote" role="status" hidden></div>
+        <div class="pinbar" id="pinBar" hidden></div>
+      </div>
+      <div class="chart-wrap">
+        <div class="axis-y" id="axisY">↑ 똑똑함</div>
+        <div id="chart" class="chart" role="img" aria-label="모델별 비용 대비 종합 성능 그래프"></div>
+        <div class="zoom-toast" id="zoomToast" aria-live="polite"></div>
+        <div class="chart-empty" id="chartEmpty" hidden></div>
+        <div class="zoom-badge" id="zoomBadge"><b>확대 모드</b><span class="zb-pc"> · 휠로 확대/축소 · 끝내기: <kbd>Esc</kbd> 또는 그래프 밖 클릭</span><span class="zb-mo"> · 두 손가락으로 확대/축소</span></div>
+      </div>
+      <div class="chart-foot">
+        <span class="axis-x" id="axisX"></span>
+        <span class="key key-hint" id="pinHint"></span>
+      </div>
+      <ol class="notes" id="notes"></ol>
+    </section>
+  </div>
+
+  <div class="col-text">
+    <!-- 오늘의 답: 큰 문장 하나 (모델 이름에 마우스 → 지도에서 강조, 누르면 상세) -->
+    <section class="lead" id="mapHead">
+      <h1 class="headline"><span class="hl-label">오늘의 답<span class="kdate" id="heroDate"></span></span><span id="headline">돈을 쓴 만큼 똑똑한 AI는 무엇일까</span></h1>
+      <p class="lede">점 하나가 <b>모델 × 추론 등급</b> 하나. 위로 갈수록 똑똑하고 왼쪽으로 갈수록 쌉니다. <b>파란 계단(가성비 경계선)</b> 위의 점을 고르면 돈을 낭비하지 않아요.</p>
       <dl class="facts" id="facts"></dl>
+    </section>
+
+    <!-- 최고 성능 · 가성비 추천 -->
+    <div class="callouts" id="cards"></div>
+
+    <!-- 최근 30일 새 모델 (누르면 상세) -->
+    <section class="newlist rv" id="ticker" hidden></section>
+
+    <!-- 지도 읽는 법 -->
+    <section class="read-keys rv" aria-label="지도 읽는 법">
+      <h3 class="sub-h">지도 읽는 법</h3>
+      <ul>
+        <li><i class="k-band"></i>파란 계단 = 가성비 경계선. 이보다 싸면서 더 똑똑한 모델은 아직 없어요. 옅은 파란 띠 = 오차 범위</li>
+        <li><i class="k-pin"></i>파란 핀 1) 2) 3) = 위 문장의 각주</li>
+        <li><i class="k-near"></i>점선 테두리 = 경계선보다 조금 낮지만 오차 안이라 사실상 동급</li>
+        <li><i class="k-line"></i>같은 모델의 추론 등급끼리 이은 선</li>
+        <li><i class="k-hollow"></i>속이 빈 점 = 가격표로 짐작한 비용</li>
+        <li><i class="k-co"></i>점의 색·모양 = 회사. 마우스를 올리면 그 회사만 또렷하게</li>
+        <li><b>none · 생각 끔</b> = 생각(추론)을 끄고 바로 답하는 공식 설정. 빠르고 싸지만 덜 똑똑해요</li>
+      </ul>
+    </section>
+
+    <!-- ───────── 순위표 ───────── -->
+    <div class="sec-head rv" id="rankHead">
+      <h2>순위표</h2>
+      <p id="tableSub">줄을 누르면 지도에 고정돼요</p>
     </div>
-  </section>
+    <section class="table-box rv">
+      <div class="table-head">
+        <div class="table-opts">
+          <label class="tog"><input type="checkbox" id="optBestOnly"><i></i><span>모델마다 최고 등급만</span></label>
+          <label class="tog"><input type="checkbox" id="optPinnedOnly"><i></i><span>고정한 모델만</span></label>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="table">
+          <thead><tr>
+            <th data-k="rank" class="c-rank">#</th>
+            <th data-k="name">모델</th>
+            <th data-k="effort" class="c-eff">추론 등급</th>
+            <th data-k="score" class="num c-score" id="scoreTh">종합 점수</th>
+            <th data-k="cost" class="num c-cost">문제당 비용</th>
+            <th data-k="costok" class="num c-costok" title="문제당 비용 ÷ 정답률 (매우 어려운 문제 기준)">맞힌 문제당</th>
+            <th data-k="value" class="num" title="비용이 10배 늘 때 점수가 얼마나 오르는지 기준의 상대 점수 — 높을수록 가성비 좋음">가성비</th>
+            <th data-k="price" class="num c-price" title="100만 토큰당 입력/출력 가격">가격표</th>
+            <th data-k="date" class="c-date">출시</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <button id="moreRows" class="more" type="button">더 보기</button>
+    </section>
 
-  <!-- ───────── 조절: 글자 목록 (고른 것은 검정, 나머지는 회색) — 휴대폰은 아래 막대 + 올라오는 판 ───────── -->
-  <div class="dock-scrim" id="dockScrim" hidden></div>
-  <section class="dock" id="dock" aria-label="보기 조절">
-    <div class="dock-in">
-      <div class="dock-sheet">
-        <div class="sheet-title">보기 조절</div>
-        <div class="ctl">
-          <span class="ctl-label">가로축</span>
-          <div class="seg" id="xAxisSeg">
-            <button data-v="cost" type="button" title="문제 1개를 푸는 데 실제로 든 돈">문제당 비용</button>
-            <button data-v="costok" type="button" title="문제당 비용 ÷ 정답률 (매우 어려운 문제 기준). 자주 틀리는 모델일수록 비싸져요">맞힌 문제당</button>
-          </div>
-        </div>
-        <div class="ctl">
-          <span class="ctl-label">출시</span>
-          <div class="seg" id="periodSeg">
-            <button data-v="3" type="button">3개월</button>
-            <button data-v="6" type="button">6개월</button>
-            <button data-v="12" type="button">1년</button>
-            <button data-v="0" type="button">전체</button>
-          </div>
-        </div>
-        <div class="ctl">
-          <span class="ctl-label">회사별</span>
-          <div class="menu" id="perCoMenu">
-            <button class="menu-btn" type="button" aria-haspopup="listbox" aria-label="회사마다 보여 줄 모델 개수" title="회사마다 점수 높은 순으로 몇 개씩 보여 줄지 (검색 결과에도 똑같이 적용 · 가성비 경계선 위 모델과 고정한 모델은 개수와 상관없이 함께 보여요)"><span id="perCoText">3개</span></button>
-            <div class="menu-pop" role="listbox"></div>
-          </div>
-        </div>
-        <div class="ctl" id="viewMenu">
-          <span class="ctl-label">보기</span>
-          <button class="menu-btn" type="button" hidden>보기</button>
-          <div class="menu-pop">
-            <label class="tog"><input type="checkbox" id="optFrontier"><i></i><span>가성비 경계선</span></label>
-            <label class="tog"><input type="checkbox" id="optLabels"><i></i><span>모델 이름</span></label>
-            <label class="tog" title="평가기관이 따로 쟀지만 실제 AI 에선 못 고르는 등급은 숨김 (예: 생각을 끌 수 없는 GPT-6 Astra 의 none)"><input type="checkbox" id="optSelectable"><i></i><span>고를 수 있는 등급만</span></label>
-            <label class="tog" title="측정 기록이 없어 가격표로 추정한 점 (속이 빈 점)"><input type="checkbox" id="optEstimated"><i></i><span>추정 비용</span></label>
-            <button class="menu-reset" id="resetSettings" type="button" title="맞힌 문제당 · 전체 기간 · 회사마다 3개 · 경계선·이름 켬 · 고를 수 있는 등급만 · 추정 비용 끔 · 상위 5개 회사만 · 흰 화면">기본값으로</button>
-          </div>
-        </div>
-      </div>
-      <div class="dock-bar">
-        <div class="ctl ctl-search">
-          <span class="ctl-label">찾기</span>
-          <label class="search">
-            <input id="search" type="search" placeholder="모델 이름 · 쉼표로 여러 개" title="쉼표로 여러 개를 한 번에 찾을 수 있어요. 예: 제미나이, gpt, claude opus (한글 이름도 됨)" aria-label="모델 찾기" autocomplete="off">
-            <kbd class="kbd-slash" aria-hidden="true">/</kbd>
-          </label>
-        </div>
-        <button class="dock-toggle" id="dockToggle" type="button" aria-expanded="false" aria-label="보기 조절 열기"><span class="dt-open">조절</span><span class="dt-close">완료</span></button>
-      </div>
+    <!-- ───────── 출처와 방법 ───────── -->
+    <div class="sec-head rv" id="srcHead">
+      <h2>출처와 방법</h2>
+      <p>두 평가기관의 공개 점수를 합쳐 하나의 종합 점수로</p>
     </div>
-  </section>
+    <footer class="foot rv" id="foot"></footer>
 
-  <!-- ───────── 지면: 왼쪽 지도(고정) · 오른쪽 기사 ───────── -->
-  <div class="spread" id="map">
-    <div class="col-map">
-      <section class="chart-box" id="chartBox">
-        <div class="chart-head">
-          <div class="legend" id="legend"></div>
-          <div class="chart-tools">
-            <button id="zoomIn" class="tbtn" type="button" title="확대" aria-label="확대">＋</button>
-            <button id="zoomOut" class="tbtn" type="button" title="축소" aria-label="축소">－</button>
-            <button id="resetZoom" class="tbtn" type="button" title="처음 화면으로" aria-label="처음 화면으로">처음</button>
-            <button id="fullBtn" class="tbtn tbtn-text" type="button" title="그래프만 화면 가득 (휴대폰은 가로로 돌리면 더 넓게)"><span id="fullText">크게 보기</span></button>
-          </div>
-        </div>
-        <div class="map-bars">
-          <div class="search-note" id="searchNote" role="status" hidden></div>
-          <div class="pinbar" id="pinBar" hidden></div>
-        </div>
-        <div class="chart-wrap">
-          <div class="axis-y" id="axisY">↑ 똑똑함 <span>종합 성능 점수</span></div>
-          <div id="chart" class="chart" role="img" aria-label="모델별 비용 대비 종합 성능 그래프"></div>
-          <div class="zoom-toast" id="zoomToast" aria-live="polite"></div>
-          <div class="chart-empty" id="chartEmpty" hidden></div>
-          <div class="zoom-badge" id="zoomBadge"><b>확대 모드</b><span class="zb-pc"> · 휠로 확대/축소 · 끝내기: <kbd>Esc</kbd> 또는 그래프 밖 클릭</span><span class="zb-mo"> · 두 손가락으로 확대/축소</span></div>
-        </div>
-        <div class="chart-foot">
-          <span class="axis-x" id="axisX"></span>
-          <span class="key key-hint" id="pinHint"></span>
-        </div>
-        <ol class="notes" id="notes"></ol>
-      </section>
-    </div>
-
-    <div class="col-text">
-      <!-- 최고 성능 · 가성비 추천 -->
-      <div class="callouts" id="cards"></div>
-
-      <!-- 지도 읽는 법 -->
-      <div class="read-keys rv" aria-label="지도 읽는 법">
-        <span class="rk-title">읽는 법</span>
-        <span class="key"><i class="k-band"></i>파란 계단 = 가성비 경계선 · 옅은 띠 = 오차 범위</span>
-        <span class="key"><i class="k-pin"></i>파란 핀 1) 2) 3) = 위 문장의 각주</span>
-        <span class="key" title="경계선보다 조금 낮지만 점수 오차 범위 안이라 사실상 같은 수준"><i class="k-near"></i>점선 테두리 = 사실상 동급</span>
-        <span class="key"><i class="k-line"></i>같은 모델의 추론 등급끼리 이은 선</span>
-        <span class="key"><i class="k-hollow"></i>속이 빈 점 = 추정 비용</span>
-        <span class="key"><i class="k-co"></i>점의 색·모양 = 회사 (마우스를 올리면 그 회사만 또렷하게)</span>
-        <span class="key" title="AI가 답하기 전에 속으로 생각(추론)하는 과정을 끄고 바로 답하는 설정. 빠르고 싸지만 덜 똑똑해요"><b>none · 생각 끔</b> = 생각(추론)을 끄고 바로 답하는 공식 설정</span>
-      </div>
-
-      <!-- ───────── 순위표 ───────── -->
-      <div class="sec-head rv" id="rankHead">
-        <h2>순위표</h2>
-        <p id="tableSub">줄을 누르면 지도에 고정돼요</p>
-      </div>
-      <section class="table-box rv">
-        <div class="table-head">
-          <div class="table-opts">
-            <label class="tog"><input type="checkbox" id="optBestOnly"><i></i><span>모델마다 최고 등급만</span></label>
-            <label class="tog"><input type="checkbox" id="optPinnedOnly"><i></i><span>고정한 모델만</span></label>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table id="table">
-            <thead><tr>
-              <th data-k="rank" class="c-rank">#</th>
-              <th data-k="name">모델</th>
-              <th data-k="effort" class="c-eff">추론 등급</th>
-              <th data-k="score" class="num c-score" id="scoreTh">종합 점수</th>
-              <th data-k="cost" class="num c-cost">문제당 비용</th>
-              <th data-k="costok" class="num c-costok" title="문제당 비용 ÷ 정답률 (매우 어려운 문제 기준)">맞힌 문제당</th>
-              <th data-k="value" class="num" title="비용이 10배 늘 때 점수가 얼마나 오르는지 기준의 상대 점수 — 높을수록 가성비 좋음">가성비</th>
-              <th data-k="price" class="num c-price" title="100만 토큰당 입력/출력 가격">가격표</th>
-              <th data-k="date" class="c-date">출시</th>
-            </tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-        <button id="moreRows" class="more" type="button">더 보기</button>
-      </section>
-
-      <!-- ───────── 출처와 방법 ───────── -->
-      <div class="sec-head rv" id="srcHead">
-        <h2>출처와 방법</h2>
-        <p>두 평가기관의 공개 점수를 합쳐 하나의 종합 점수로</p>
-      </div>
-      <footer class="foot rv" id="foot"></footer>
-
-      <div class="closing rv">
-        <p class="closing-line">경계선 위의 모델을 고르세요. <span>같은 돈으로 가장 똑똑한 AI를 씁니다.</span></p>
-        <a class="closing-top" href="#top">맨 위로 ↑</a>
-      </div>
+    <div class="closing rv">
+      <p class="closing-line">경계선 위의 모델을 고르세요.<br><span>같은 돈으로 가장 똑똑한 AI를 씁니다.</span></p>
+      <a class="closing-top" href="#top">맨 위로 ↑</a>
     </div>
   </div>
 </main>
