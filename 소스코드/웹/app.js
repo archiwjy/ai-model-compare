@@ -497,17 +497,21 @@
     const nm = (v) => `<span class="nm"${att(v)}>${esc(v.m.name)}</span><span class="ef">${esc(v.eff)}</span>`;
     const ef = (v) => `<span class="nm"${att(v)}>${esc(v.eff)}</span>`;
     const save = (v) => { const a = costFor(v), b = costFor(P.top); return a && b ? Math.min(99, Math.round((1 - a / b) * 100)) : 0; };
-    let h = `지금 가장 똑똑한 AI는 ${nm(P.top)}${sup(1)}.`;
+    // 문장마다 줄을 나눔: 위에 작은 질문, 아래에 큰 답 (세 문장 사이는 띄움 — 읽기 쉽게)
+    const line = (n, q, ans) => `<span class="hl-s"><span class="hl-q"><i>${n}</i>${q}</span><span class="hl-a">${ans}</span></span>`;
+    let h = line(1, "지금 가장 똑똑한 AI는", `${nm(P.top)}${sup(1)}`);
     if (P.value && P.value !== P.top) {
       const s1 = save(P.value);
-      h += ` 사실상 같은 실력을 ${s1 > 0 ? `<em>${s1}% 싸게</em>` : "비슷한 값에"} 쓰려면 ${P.value.m === P.top.m ? "같은 모델의 " + ef(P.value) : nm(P.value)}${sup(2)}`;
+      h += line(2, `사실상 같은 실력을 ${s1 > 0 ? `<em>${s1}% 싸게</em>` : "비슷한 값에"} 쓰려면`,
+        `${P.value.m === P.top.m ? `<span class="hl-pre">같은 모델의</span>` + ef(P.value) : nm(P.value)}${sup(2)}`);
     } else if (P.value) {
-      h += ` 가성비로 봐도 이 점이 가장 좋아요${sup(2)}`;
+      h += line(2, "가성비로 봐도", `이 모델이 가장 좋아요${sup(2)}`);
     }
     if (P.alt && P.alt !== P.value) {
-      const base = P.value || P.top;
-      h += `${P.value ? "," : "."} 더 아끼려면 ${P.alt.m === base.m ? ef(P.alt) : nm(P.alt)}${sup(3)}.`;
-    } else if (P.value) h += ".";
+      const base = P.value || P.top, s3 = save(P.alt);
+      h += line(3, `더 아끼려면${s3 > 0 ? ` <span class="hl-sv">(${s3}% 싸게)</span>` : ""}`,
+        `${P.alt.m === base.m ? `<span class="hl-pre">같은 모델의</span>` + ef(P.alt) : nm(P.alt)}${sup(3)}`);
+    }
     el.innerHTML = h;
     if (notes) {
       const row = (n, v) => `<li data-key="${esc(v.m.key)}" data-eff="${esc(v.effort)}"><b>${n})</b><span>${esc(v.m.name)} · ${esc(v.eff)}</span> — 종합 ${v.score.toFixed(1)}점 · ${esc(costUnit())} ${fmtCost(costFor(v))}</li>`;
