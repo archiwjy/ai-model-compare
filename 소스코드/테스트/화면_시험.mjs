@@ -594,15 +594,26 @@ const TESTS = [
     fx: "big", vp: DESK,
     readyMs: 20000,
     async run(t, ok, info) {
-      ok(info.state === "1" && info.ms < 12000, "12초 안에 준비", `${info.ms}ms`);
-      const ms = await t.eval(async () => {
+      // 주소를 연 순간부터 화면 준비까지 (data.js 2MB 읽기 + 계산 + 그리기 모두 포함)
+      const total = await t.eval(() => Math.round(performance.now()));
+      ok(info.state === "1" && total < 15000, "열고 다 그리기까지 15초 안", `${total}ms`);
+      // 검색 Enter = 기다림 없이 바로 다시 그림 → 한 번 다시 그리는 시간
+      const ms = await t.eval(() => {
         const inp = document.querySelector("#search");
+        inp.value = "gpt";
         const t0 = performance.now();
-        inp.value = "gpt"; inp.dispatchEvent(new Event("input"));
-        await new Promise((r) => setTimeout(r, 2500));
+        inp.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
         return Math.round(performance.now() - t0);
       });
-      ok(ms < 4000, "검색 반응", ms + "ms");
+      ok(ms < 3000, "검색 한 번 다시 그리기 3초 안", ms + "ms");
+      const ms2 = await t.eval(() => {
+        const t0 = performance.now();
+        document.querySelector('#periodSeg button[data-v="6"]').click();
+        return Math.round(performance.now() - t0);
+      });
+      ok(ms2 < 3000, "출시 기간 바꾸기 3초 안", ms2 + "ms");
+      const found = await t.eval(() => document.querySelector("#searchNote").innerText);
+      ok(/찾은 모델/.test(found), "큰 데이터에서도 검색 안내", found.slice(0, 80));
     },
   },
   {
