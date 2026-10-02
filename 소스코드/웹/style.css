@@ -6,7 +6,7 @@
    · 글자 크기 차이를 극단적으로: 아주 큰 문장 하나 ↔ 아주 작은 설명. 큰 글자도 굵기는 보통.
    · 펼친 지면: 왼쪽은 그림(지도 · 조절 장치와 함께 고정), 오른쪽은 기사(큰 문장 → 추천 → 표).
    · 누르는 것은 두 종류뿐: 동그란 버튼(원) · 밑줄 없는 글자 목록(고른 것 = 검정 →, 나머지 = 회색).
-   · 색은 파랑 하나 (경계선 · 핀 · 가성비 추천 1위). 회사 색은 인쇄 잉크처럼 은은하게.
+   · 색은 연보라 하나 (경계선 · 핀 · 가성비 추천 1위 — 이스탄불 비엔날레 그림의 라벤더). 회사 색은 인쇄 잉크처럼 은은하게.
    · 읽기 쉽게: 회색 글자도 흰 바탕 대비 4.5:1 이상, 본문 15px, 표 14px.
    ═══════════════════════════════════════════════════════════ */
 
@@ -26,12 +26,13 @@
   --ink: #000000;
   --ink-text: #ffffff;
   --ink-soft: rgba(0, 0, 0, 0.04);
-  --acc: #1652ff;
-  --acc-text: #1446e0;
-  --acc-on: #ffffff;
-  --acc-soft: rgba(22, 82, 255, 0.07);
-  --acc-line: rgba(22, 82, 255, 0.4);
-  --acc-fill: #d6e3ff;
+  --acc: #7c6cf2;              /* 하나뿐인 색: 연보라 (경계선 · 핀) */
+  --acc-text: #5a45d8;         /* 보라 글자 (흰 바탕 대비 6:1) */
+  --acc-on: #0a0a0a;           /* 보라 위의 글자 = 검정 */
+  --acc-block: #b9aeff;        /* 가성비 추천 1위 칸 (라벤더) */
+  --acc-soft: rgba(124, 108, 242, 0.09);
+  --acc-line: rgba(124, 108, 242, 0.45);
+  --acc-fill: #e7e2ff;         /* 오차 범위 띠 */
   --frontier: var(--acc);
   --dot: #8a8a8a;
   --dot-line: rgba(0, 0, 0, 0.16);
@@ -41,7 +42,7 @@
   --warn: #9a5c00;
   --bad: #b8321f;
   --c1: #c4573a; --c2: #2f7d55; --c3: #b0862a; --c4: #c2507f;
-  --c5: #c2507f; --c6: #2f7d55; --c7: #7a5ba8; --c8: #b8321f; --c0: #8a8a8a;
+  --c5: #c2507f; --c6: #2f7d55; --c7: #3b6fb0; --c8: #b8321f; --c0: #8a8a8a;
   --sans: "Pretendard Variable", Pretendard, "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
   --mono: var(--sans);
   --ease: cubic-bezier(.2, .8, .2, 1);
@@ -64,12 +65,13 @@
   --ink: #f2f2ef;
   --ink-text: #0a0a0a;
   --ink-soft: rgba(255, 255, 255, 0.06);
-  --acc: #4f84ff;
-  --acc-text: #7ba2ff;
-  --acc-on: #ffffff;
-  --acc-soft: rgba(79, 132, 255, 0.12);
-  --acc-line: rgba(79, 132, 255, 0.45);
-  --acc-fill: #152a5c;
+  --acc: #a194ff;
+  --acc-text: #b9b0ff;
+  --acc-on: #0a0a0a;
+  --acc-block: #b3a8ff;
+  --acc-soft: rgba(161, 148, 255, 0.13);
+  --acc-line: rgba(161, 148, 255, 0.5);
+  --acc-fill: #2a2357;
   --dot: #7d7d7a;
   --dot-line: rgba(255, 255, 255, 0.16);
   --grid: rgba(255, 255, 255, 0.07);
@@ -77,7 +79,7 @@
   --warn: #e0a54a;
   --bad: #ef6a5a;
   --c1: #e2805f; --c2: #5fb487; --c3: #d6ad55; --c4: #e47ca8;
-  --c5: #e47ca8; --c6: #5fb487; --c7: #a78ad8; --c8: #ef6a5a; --c0: #7d7d7a;
+  --c5: #e47ca8; --c6: #5fb487; --c7: #6fa0de; --c8: #ef6a5a; --c0: #7d7d7a;
 }
 
 /* ───── 기본 ───── */
@@ -88,7 +90,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
   font-feature-settings: "tnum", "ss06"; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; overflow-x: clip; word-break: keep-all; overflow-wrap: break-word; }
 h1, h2, h3, .lede, .tip, .vd, .closing-line, .read-keys li { text-wrap: pretty; }
 body.no-scroll, body.sheet-open { overflow: hidden; }
-::selection { background: var(--acc); color: var(--acc-on); }
+::selection { background: var(--acc-block); color: var(--acc-on); }
 a { color: inherit; }
 button { font: inherit; color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
@@ -293,7 +295,7 @@ kbd { font: 600 10.5px/1 var(--sans); padding: 2px 5px; border: 1px solid var(--
 .tip-hint { margin-top: 7px; font-size: 12px; color: var(--muted); }
 .tip-front { margin: 2px 0 6px; padding: 4px 8px; font-size: 12.5px; background: var(--surface-2); color: var(--text-2); }
 .tip-front b { color: var(--text); }
-.tip-front.front { background: var(--acc); color: var(--acc-on); }
+.tip-front.front { background: var(--acc-block); color: var(--acc-on); }
 .tip-front.front b { color: var(--acc-on); }
 
 /* ═════════ 오른쪽 기사 ═════════ */
@@ -363,12 +365,12 @@ kbd { font: 600 10.5px/1 var(--sans); padding: 2px 5px; border: 1px solid var(--
 .vt-row.first .vs small, .vt-row.first .vc small { font-size: 12px; letter-spacing: 0; margin-top: 6px; }
 .vt-row.first .vd { margin-top: 8px; font-size: 13px; color: var(--text-2); }
 /* 가성비 추천 1위 = 이 화면에서 단 하나의 색칠한 칸 */
-.pick[data-kind="value"] .vt-row.first { background: var(--acc); color: var(--acc-on); padding: 16px 16px 18px; margin: 0 -16px; border-top-color: var(--acc); }
-.pick[data-kind="value"] .vt-row.first:hover { background: var(--acc); filter: brightness(1.07); }
+.pick[data-kind="value"] .vt-row.first { background: var(--acc-block); color: var(--acc-on); padding: 16px 16px 18px; margin: 0 -16px; border-top-color: var(--acc-block); }
+.pick[data-kind="value"] .vt-row.first:hover { background: var(--acc-block); filter: brightness(1.04); }
 .pick[data-kind="value"] .vt-row.first .rk, .pick[data-kind="value"] .vt-row.first small, .pick[data-kind="value"] .vt-row.first .vd,
 .pick[data-kind="value"] .vt-row.first .vd .up, .pick[data-kind="value"] .vt-row.first .vc, .pick[data-kind="value"] .vt-row.first .vs b,
 .pick[data-kind="value"] .vt-row.first .eff-chip { color: var(--acc-on); }
-.pick[data-kind="value"] .vt-row.first small, .pick[data-kind="value"] .vt-row.first .vd, .pick[data-kind="value"] .vt-row.first .eff-chip { opacity: .8; }
+.pick[data-kind="value"] .vt-row.first small, .pick[data-kind="value"] .vt-row.first .vd, .pick[data-kind="value"] .vt-row.first .eff-chip { opacity: .72; }
 .pick-conf { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-top: 12px; font-size: 12.5px; color: var(--muted); }
 .pick-conf .lv { font-weight: 700; color: var(--text); }
 .pick-conf .ck.ok { color: var(--text-2); }
@@ -465,7 +467,7 @@ table#table { width: 100%; border-collapse: collapse; font-size: 14px; min-width
 .badge.est { color: var(--muted); }
 .badge.mid { color: var(--text); }
 .badge.lo { color: var(--muted); }
-.badge.fr { padding: 1px 6px; border-radius: 999px; background: var(--acc); color: var(--acc-on); }
+.badge.fr { padding: 1px 6px; border-radius: 999px; background: var(--acc-block); color: var(--acc-on); }
 .badge.nr { padding: 0 5px; border-radius: 999px; color: var(--acc-text); border: 1px dashed var(--acc-line); }
 
 /* 출처 · 맺음말 */
@@ -557,7 +559,7 @@ table#table { width: 100%; border-collapse: collapse; font-size: 14px; min-width
   .dt-close { display: none; }
   .dock.open .dt-open { display: none; }
   .dock.open .dt-close { display: inline; }
-  .dock.open .dock-toggle { background: var(--acc); color: var(--acc-on); }
+  .dock.open .dock-toggle { background: var(--acc-block); color: var(--acc-on); }
   .dock.open { border-radius: 22px; }
   .dock-scrim:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 55; background: rgba(0, 0, 0, .35); animation: fade .2s both; }
   .dock-sheet { display: none; }

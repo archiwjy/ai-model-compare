@@ -775,7 +775,7 @@
           symbolSize: base + (pinned ? 3 : 0) + (fr ? 3 : nr ? 2 : 0),
           itemStyle: Object.assign(
             hollow ? { color: surf, borderColor: col, borderWidth: 2 }
-              : fr ? { color: col, borderColor: ink, borderWidth: 1.6 }   // 경계선 위 점: 회사 색 + 파란 테두리
+              : fr ? { color: col, borderColor: ink, borderWidth: 1.6 }   // 경계선 위 점: 회사 색 + 보라 테두리
               : nr ? { color: col, borderColor: ink, borderWidth: 1.4, borderType: [2, 2] }
               : { color: col, borderColor: surf, borderWidth: 1.5 },
             { opacity: dim ? 0.14 : 1 }),
@@ -861,7 +861,7 @@
       const hr = headEl.getBoundingClientRect(), cr = chartEl.getBoundingClientRect();
       regionRects.push({ x: hr.left - cr.left - 6, y: hr.top - cr.top - 6, w: hr.width + 12, h: hr.height + 12 });
     }
-    // 각주 핀: 큰 문장의 1) 2) 3) 이 가리키는 점에 파란 핀 (이름표가 핀을 가리지 않게 그 자리를 비워 둠)
+    // 각주 핀: 큰 문장의 1) 2) 3) 이 가리키는 점에 보라 핀 (이름표가 핀을 가리지 않게 그 자리를 비워 둠)
     pinTargets().forEach((t, i) => {
       const x = xOf(t.v), inV = x >= V.x0 && x <= V.x1 && t.v.score >= V.y0 && t.v.score <= V.y1;
       const X = inV ? gx(x) : -999, Y = inV ? gy(t.v.score) : -999, label = t.n.map((n) => n + ")").join(" ");
@@ -879,7 +879,7 @@
       const pts = front.map((p) => [p.x, +p.v.score.toFixed(2)]);
       pts.push([V.x1 * 1.5, pts[pts.length - 1][1]]);   // 가장 비싼 경계 점 오른쪽으로도 수평 연장
       const k = FR.k;
-      // 오차 범위 띠: 경계선(계단)과 그보다 k점 낮은 계단 사이를 옅은 파랑으로 칠함 (포스터의 파란 띠처럼)
+      // 오차 범위 띠: 경계선(계단)과 그보다 k점 낮은 계단 사이를 옅은 보라로 칠함 (포스터의 띠처럼)
       //  · 직접 다각형으로 그려 확대·이동해도 그대로 따라감
       const bandFill = css("--acc-fill");
       series.push({

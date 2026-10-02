@@ -16,10 +16,10 @@
 <meta name="color-scheme" content="light dark">
 <meta name="apple-mobile-web-app-title" content="AI 성능비교">
 <meta name="mobile-web-app-capable" content="yes">
-<link rel="manifest" href="manifest.webmanifest?v=7">
-<link rel="icon" type="image/png" sizes="64x64" href="icons/favicon-64.png?v=7">
-<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png?v=7">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=7">
+<link rel="manifest" href="manifest.webmanifest?v=8">
+<link rel="icon" type="image/png" sizes="64x64" href="icons/favicon-64.png?v=8">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png?v=8">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=8">
 <title>AI 모델 성능비교판</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="style.css">
@@ -143,7 +143,7 @@
     <!-- 오늘의 답: 큰 문장 하나 (모델 이름에 마우스 → 지도에서 강조, 누르면 상세) -->
     <section class="lead" id="mapHead">
       <h1 class="headline"><span class="hl-label">오늘의 답<span class="kdate" id="heroDate"></span></span><span id="headline">돈을 쓴 만큼 똑똑한 AI는 무엇일까</span></h1>
-      <p class="lede">점 하나가 <b>모델 × 추론 등급</b> 하나. 위로 갈수록 똑똑하고 왼쪽으로 갈수록 쌉니다. <b>파란 계단(가성비 경계선)</b> 위의 점을 고르면 돈을 낭비하지 않아요.</p>
+      <p class="lede">점 하나가 <b>모델 × 추론 등급</b> 하나. 위로 갈수록 똑똑하고 왼쪽으로 갈수록 쌉니다. <b>보라 계단(가성비 경계선)</b> 위의 점을 고르면 돈을 낭비하지 않아요.</p>
       <dl class="facts" id="facts"></dl>
     </section>
 
@@ -157,8 +157,8 @@
     <section class="read-keys rv" aria-label="지도 읽는 법">
       <h3 class="sub-h">지도 읽는 법</h3>
       <ul>
-        <li><i class="k-band"></i>파란 계단 = 가성비 경계선. 이보다 싸면서 더 똑똑한 모델은 아직 없어요. 옅은 파란 띠 = 오차 범위</li>
-        <li><i class="k-pin"></i>파란 핀 1) 2) 3) = 위 문장의 각주</li>
+        <li><i class="k-band"></i>보라 계단 = 가성비 경계선. 이보다 싸면서 더 똑똑한 모델은 아직 없어요. 옅은 보라 띠 = 오차 범위</li>
+        <li><i class="k-pin"></i>보라 핀 1) 2) 3) = 위 문장의 각주</li>
         <li><i class="k-near"></i>점선 테두리 = 경계선보다 조금 낮지만 오차 안이라 사실상 동급</li>
         <li><i class="k-line"></i>같은 모델의 추론 등급끼리 이은 선</li>
         <li><i class="k-hollow"></i>속이 빈 점 = 가격표로 짐작한 비용</li>
